@@ -1523,7 +1523,7 @@ done:
  *
  * @return 1 if succesfully updated navinfo, 0 if update failed
  */
-static void CompositeInternal_prepareNavinfoForInterpolation(
+static int CompositeInternal_prepareNavinfoForInterpolation(
     PolarNavigationInfo* navinfo,
     int interpolationDimensions[])
 {
