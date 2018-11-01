@@ -169,6 +169,18 @@ const char* RaveHL_convertQuantity(const char* name)
   return name;
 }
 
+int RaveHL_countChar(const char* name, char c)
+{
+  int i = 0, n = 0;
+  int result = 0;
+  n = strlen(name);
+  for (i = 0; i < n; i++) {
+    if (name[i] == c)
+      result++;
+  }
+  return result;
+}
+
 /**
  * Creates a rave attribute from a HLHDF node value.
  * Node must contain data that can be translated to long, double or strings otherwise
@@ -791,7 +803,7 @@ int RaveHL_loadAttributesAndData(HL_NodeList* nodelist, void* object, RaveHL_att
         if (HLNode_getType(node) == ATTRIBUTE_ID &&
             (strncasecmp(tmpptr, "how/", 4)==0 ||
              strncasecmp(tmpptr, "what/", 5)==0 ||
-             strncasecmp(tmpptr, "where/", 6)==0)) {
+             strncasecmp(tmpptr, "where/", 6)==0) && RaveHL_countChar(tmpptr, '/') == 1) {
           RaveAttribute_t* attribute = RaveHL_createAttribute(node);
           if (attribute != NULL) {
             result = RaveAttribute_setName(attribute, RaveHL_convertAttributeName(tmpptr));
