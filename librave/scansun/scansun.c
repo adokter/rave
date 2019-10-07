@@ -42,6 +42,8 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
 /*December 2015: Minor refactor in order to enable the creation of a quality plugin for
  *chaining scansun in memory like other algorithms.*/
 /*October 2018: original code using Numerical Recipes has been replaced.*/
+/*April 2019: Now ODIM v2.1 files can be processed too. Additionally, the use of astart has been
+ *adjusted to be ODIM compliant, and stopaz is estimated in case stopazA is not available.*/
 /* Note that Iwan's code is largely left 'as is', except for the 'fill_meta' and
  * 'scansun' function which are restructured and modularized. Definitions and structures have been
  * placed in their own header file. */
@@ -129,13 +131,13 @@ void fill_toplevelmeta(RaveCoreObject* object, SCANMETA *meta)
       meta->radcnst = RADCNST;
     } else meta->radcnst = tmpd;
 
-    if (!getDoubleAttribute(object, "how/RXlossH", &tmpd)) {
-      RAVE_WARNING1("No /how/RXlossH attribute. Using default %2.1f dB.\n", RXLOSS);
+    if (!getDoubleAttribute(object, "how/RXloss", &tmpd) && !getDoubleAttribute(object, "how/RXlossH", &tmpd)) {
+      RAVE_WARNING1("No /how/RXloss or /how/RXlossH attribute. Using default %2.1f dB.\n", RXLOSS);
       meta->RXLoss = RXLOSS;
     } else meta->RXLoss = tmpd;
 
-    if (!getDoubleAttribute(object, "how/antgainH", &tmpd)) {
-      RAVE_WARNING1("No /how/antgainH attribute. Using default %2.1f dB.\n", ANTGAIN);
+    if (!getDoubleAttribute(object, "how/antgain", &tmpd) && !getDoubleAttribute(object, "how/antgainH", &tmpd)) {
+      RAVE_WARNING1("No /how/antgain or /how/antgainH attribute. Using default %2.1f dB.\n", ANTGAIN);
       meta->AntGain = ANTGAIN;
     } else meta->AntGain = tmpd;
 
@@ -145,13 +147,13 @@ void fill_toplevelmeta(RaveCoreObject* object, SCANMETA *meta)
       meta->radcnst = RADCNST;
     } else meta->radcnst = tmpd;
 
-    if (!getDoubleAttribute(object, "how/RXlossV", &tmpd)) {
-      RAVE_WARNING1("No /how/RXlossV attribute. Using default %2.1f dB.\n", RXLOSS);
+    if (!getDoubleAttribute(object, "how/RXloss", &tmpd) && !getDoubleAttribute(object, "how/RXlossV", &tmpd)) {
+      RAVE_WARNING1("No /how/RXloss or /how/RXlossV attribute. Using default %2.1f dB.\n", RXLOSS);
       meta->RXLoss = RXLOSS;
     } else meta->RXLoss = tmpd;
 
-    if (!getDoubleAttribute(object, "how/antgainV", &tmpd)) {
-      RAVE_WARNING1("No /how/antgainV attribute. Using default %2.1f dB.\n", ANTGAIN);
+    if (!getDoubleAttribute(object, "how/antgain", &tmpd) && !getDoubleAttribute(object, "how/antgainV", &tmpd)) {
+      RAVE_WARNING1("No /how/antgain or /how/antgainV attribute. Using default %2.1f dB.\n", ANTGAIN);
       meta->AntGain = ANTGAIN;
     } else meta->AntGain = tmpd;
   }
@@ -204,12 +206,12 @@ void fill_meta(PolarScan_t* scan, PolarScanParam_t* param, SCANMETA *meta)
        RAVE_WARNING2("Scan elevation %2.1f: No how/radconstH attribute. Using %2.1f dB.\n", meta->elev, meta->radcnst);
      } else meta->radcnst = tmpd;
 
-     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/RXlossH", &tmpd)) {
-       RAVE_WARNING2("Scan elevation %2.1f: No how/RXlossH attribute. Using %2.1f dB.\n", meta->elev, meta->RXLoss);
+     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/RXloss", &tmpd) && !getDoubleAttribute((RaveCoreObject*)scan, "how/RXlossH", &tmpd)) {
+       RAVE_WARNING2("Scan elevation %2.1f: No how/RXloss or how/RXlossH attribute. Using %2.1f dB.\n", meta->elev, meta->RXLoss);
      } else meta->RXLoss = tmpd;
 
-     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/antgainH", &tmpd)) {
-       RAVE_WARNING2("Scan elevation %2.1f: No how/antgainH attribute. Using %2.1f dB.\n", meta->elev, meta->AntGain);
+     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/antgain", &tmpd) && !getDoubleAttribute((RaveCoreObject*)scan, "how/antgainH", &tmpd)) {
+       RAVE_WARNING2("Scan elevation %2.1f: No how/antgain or how/antgainH attribute. Using %2.1f dB.\n", meta->elev, meta->AntGain);
      } else meta->AntGain = tmpd;
 
    } else if ( (!strcmp(quant, "TV")) || (!strcmp(quant, "DBZV")) ) {
@@ -217,12 +219,12 @@ void fill_meta(PolarScan_t* scan, PolarScanParam_t* param, SCANMETA *meta)
        RAVE_WARNING2("Scan elevation %2.1f: No how/radconstV attribute. Using %2.1f dB.\n", meta->elev, meta->radcnst);
      } else meta->radcnst = tmpd;
 
-     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/RXlossV", &tmpd)) {
-       RAVE_WARNING2("Scan elevation %2.1f: No how/RXlossV attribute. Using %2.1f dB.\n", meta->elev, meta->RXLoss);
+     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/RXloss", &tmpd) && !getDoubleAttribute((RaveCoreObject*)scan, "how/RXlossV", &tmpd)) {
+       RAVE_WARNING2("Scan elevation %2.1f: No how/RXloss or how/RXlossV attribute. Using %2.1f dB.\n", meta->elev, meta->RXLoss);
      } else meta->RXLoss = tmpd;
 
-     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/antgainV", &tmpd)) {
-       RAVE_WARNING2("Scan elevation %2.1f: No how/antgainV attribute. Using %2.1f dB.\n", meta->elev, meta->AntGain);
+     if (!getDoubleAttribute((RaveCoreObject*)scan, "how/antgain", &tmpd) && !getDoubleAttribute((RaveCoreObject*)scan, "how/antgainV", &tmpd)) {
+       RAVE_WARNING2("Scan elevation %2.1f: No how/antgain or how/antgainV attribute. Using %2.1f dB.\n", meta->elev, meta->AntGain);
      } else meta->AntGain = tmpd;
    }
 
@@ -432,12 +434,18 @@ int processData(PolarScan_t* scan, SCANMETA* meta, RaveList_t* list) {
 
   for (ia=0 ; ia<meta->nazim ; ia++) {
     RVALS* rvals = RAVE_MALLOC(sizeof(RVALS));
+    memset(rvals, 0, sizeof(RVALS));
     timer = 0.0;
 
     /* Use exact azimuth and elevation angles if available */
-    if ( (meta->startazA) && (meta->stopazA) ) {
+    if (meta->startazA) {
       double startaz = meta->startazA[ia];
-      double stopaz = meta->stopazA[ia];
+      double stopaz;
+      if (meta->stopazA) {
+        stopaz = meta->stopazA[ia];
+      } else {
+        stopaz = startaz + meta->ascale;
+      }
       /* Most radars scan clockwise, but negative antvel indicates otherwise */
       if (meta->antvel > 0.0) {
         if (startaz > stopaz) startaz = -(360.0-startaz);
@@ -445,8 +453,9 @@ int processData(PolarScan_t* scan, SCANMETA* meta, RaveList_t* list) {
         if (stopaz > startaz) stopaz = -(360.0-stopaz);
       }
       Azimuth = (startaz + stopaz) / 2.0;
+    } else {
+      Azimuth = ia * meta->ascale + meta->astart + meta->ascale / 2.0;
     }
-    else Azimuth = ia * meta->ascale + meta->astart;
 
 //    if (meta->startelA) Elevation = (meta->startelA[ia] + meta->stopelA[ia]) / 2.0;
     if (meta->elangles) Elevation = meta->elangles[ia];
@@ -543,15 +552,15 @@ int processData(PolarScan_t* scan, SCANMETA* meta, RaveList_t* list) {
     rvals->SunMean = SunMean;
     rvals->SunStdd = SunStdd;
     rvals->n = n;
-    rvals->quant1 = (char*)meta->quant1;
+    strcpy(rvals->quant1, meta->quant1);
     if (meta->Zdr) {
       rvals->ZdrMean = ZdrMean;
       rvals->ZdrStdd = ZdrStdd;
-      rvals->quant2 = (char*)meta->quant2;
+      strcpy(rvals->quant2, meta->quant2);
     } else {
       rvals->ZdrMean = nan("NaN");
       rvals->ZdrStdd = nan("NaN");
-      rvals->quant2 = (char*)"NA";
+      strcpy(rvals->quant2, "NA");
     }
     RaveList_add(list, rvals);  /* No checking */
     if (Rave_getDebugLevel() <= RAVE_DEBUG) outputMeta(meta);
@@ -571,8 +580,8 @@ void outputMeta(SCANMETA* meta) {
     fprintf(fd, "Date = %ld\n", meta->date);
     fprintf(fd, "Time = %ld\n", meta->time);
     fprintf(fd, "Tilt = %f\n", meta->elev);
-    fprintf(fd, "Quant1 = %s\n", (meta->quant1==NULL?"NULL":meta->quant1));
-    fprintf(fd, "Quant2 = %s\n", (meta->quant2==NULL?"NULL":meta->quant2));
+    fprintf(fd, "Quant1 = %s\n", (strcmp(meta->quant1,"")==0?"NULL":meta->quant1));
+    fprintf(fd, "Quant2 = %s\n", (strcmp(meta->quant2,"")==0?"NULL":meta->quant2));
     fprintf(fd, "nrays = %ld\n", meta->nazim);
     fprintf(fd, "nbins = %ld\n", meta->nrang);
     fprintf(fd, "rscale = %f\n", meta->rscale);
@@ -600,27 +609,27 @@ int processScan(PolarScan_t* scan, SCANMETA* meta, RaveList_t* list) {
 
   /* Quantities are queried in order of priority */
 
-  if (PolarScan_hasParameter(scan, "TH")) meta->quant1 = "TH";
-  else if (PolarScan_hasParameter(scan, "DBZH")) meta->quant1 = "DBZH";
-  else if (PolarScan_hasParameter(scan, "TV")) meta->quant1 = "TV";
-  else if (PolarScan_hasParameter(scan, "DBZV")) meta->quant1 = "DBZV";
-  else meta->quant1 = NULL;
+  if (PolarScan_hasParameter(scan, "TH")) strcpy(meta->quant1, "TH");
+  else if (PolarScan_hasParameter(scan, "DBZH")) strcpy(meta->quant1, "DBZH");
+  else if (PolarScan_hasParameter(scan, "TV")) strcpy(meta->quant1, "TV");
+  else if (PolarScan_hasParameter(scan, "DBZV")) strcpy(meta->quant1, "DBZV");
+  else strcpy(meta->quant1,"");
 
   if (PolarScan_hasParameter(scan, "ZDR")) {
-    meta->quant2 = "ZDR";
+    strcpy(meta->quant2, "ZDR");
     meta->Zdr = ZdrType_READ;
   }
   else if ( (PolarScan_hasParameter(scan, "TV")) && (!strncmp(meta->quant1, "TH", 2)) ) {
-    meta->quant2 = "TV";
+    strcpy(meta->quant2, "TV");
     meta->Zdr = ZdrType_CALCULATE;
   }
   else if ( (PolarScan_hasParameter(scan, "DBZV")) && (!strncmp(meta->quant1, "DBZH", 4)) ) {
-    meta->quant2 = "DBZV";
+    strcpy(meta->quant2, "DBZV");
     meta->Zdr = ZdrType_CALCULATE;
   }
   else meta->Zdr = ZdrType_None;
 
-  if (meta->quant1) {
+  if (strcmp(meta->quant1, "") != 0) {
 	ret = processData(scan, meta, list);
   }
   return ret;
