@@ -26,7 +26,7 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef CARTESIANPARAM_H
 #define CARTESIANPARAM_H
-#include "rave_transform.h"
+#include "rave_proj.h"
 #include "projection.h"
 #include "area.h"
 #include "rave_object.h"
@@ -162,6 +162,13 @@ int CartesianParam_isTransformable(CartesianParam_t* self);
  * @return 1 on success otherwise 0
  */
 int CartesianParam_setData(CartesianParam_t* self, long xsize, long ysize, void* data, RaveDataType type);
+
+/**
+ * Sets a lazy dataset as data member. On any requests to receive data, the lazy dataset will be used to populate
+ * the internal data field.
+ * @param[in]
+ */
+int CartesianParam_setLazyDataset(CartesianParam_t* self, LazyDataset_t* lazyDataset);
 
 /**
  * Creates data with the provided specification

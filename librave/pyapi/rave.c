@@ -9,6 +9,7 @@
 #include "h5rad.h"
 #include "polar.h"
 #include "getpy.h"
+#include "pyravecompat.h"
 #include <limits.h>
 #include "rave_alloc.h"
 
@@ -16,6 +17,10 @@
  * Sets a python error message and then performs goto fail.
  */
 #define RaiseException(type, message) {PyErr_SetString(type, message); goto fail; }
+
+#ifndef DEG_TO_RAD
+#define DEG_TO_RAD .017453292519943296
+#endif
 
 void initialize_RaveObject(RaveObject* v)
 {
@@ -283,8 +288,8 @@ int fill_rave_image_info(PyObject *inobj, RaveImageStruct *p, int set)
 
   py_nod = PyString_FromFormat("/image%d/what/nodata", set);
   py_und = PyString_FromFormat("/image%d/what/undetect", set);
-  nodata = PyString_AsString(py_nod);
-  undetect = PyString_AsString(py_und);
+  nodata = (char*)PyString_AsString(py_nod);
+  undetect = (char*)PyString_AsString(py_und);
 
   if (!GetDoubleFromINFO(inobj, nodata, &p->nodata))
     return _missing_attribute("No nodata in info");
@@ -326,7 +331,7 @@ int fill_rave_object(PyObject *robj, RaveObject *obj, int set,
   char* dataset;
 
   py_dat = PyString_FromFormat("%s%d", dsetname, set);
-  dataset = PyString_AsString(py_dat);
+  dataset = (char*)PyString_AsString(py_dat);
 
   po = PyObject_GetAttrString(robj, "data");
   if (!po || !PyDict_CheckExact(po)) {

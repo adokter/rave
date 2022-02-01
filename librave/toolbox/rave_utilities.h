@@ -140,4 +140,29 @@ int RaveUtilities_isXmlSupported(void);
  */
 int RaveUtilities_isCFConventionSupported(void);
 
+/**
+ * Returns if legacy PROJ (PROJ.4 and PROJ 5) is enabled or not
+ * @returns 0 if legacy PROJ isn't enabled in the build, otherwise 1
+ */
+int RaveUtilities_isLegacyProjEnabled(void);
+
+/**
+ * Handles the source value according to version. For example, if version < 2.3, then WIGOS will be removed.
+ * @param[in] source - source to be verified
+ * @param[in] version - what version we want to validate against.
+ * @returns the modified version. Note, should be freed with RAVE_FREE.
+ */
+char* RaveUtilities_handleSourceVersion(const char* source, RaveIO_ODIM_Version version);
+
+/**
+ * Verifies if the source is valid according to ODIM version rules. Currently
+ * the only restriction is for version >= 2.4 which says that either NOD or ORG must
+ * exist in the file depending on object type. We will not care about object type
+ * and only check if one or both of NOD or ORG exists.
+ * @param[in] source - the source to check
+ * @param[in] version - the version we are testing against.
+ * @returns 1 if source is valid, otherwise 0
+ */
+int RaveUtilities_isSourceValid(const char* source, RaveIO_ODIM_Version version);
+
 #endif /* RAVE_UTILITIES_H */

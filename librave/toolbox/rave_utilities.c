@@ -316,3 +316,72 @@ int RaveUtilities_isCFConventionSupported(void)
   return 0;
 #endif
 }
+
+int RaveUtilities_isLegacyProjEnabled(void)
+{
+#ifdef USE_PROJ4_API
+  return 1;
+#else
+  return 0;
+#endif
+}
+
+char* RaveUtilities_handleSourceVersion(const char* source, RaveIO_ODIM_Version version)
+{
+  char* result = NULL;
+  RaveList_t* sourceTokens = NULL;
+  if (source != NULL) {
+    result = RAVE_STRDUP(source);
+    if (result == NULL) {
+      goto done;
+    }
+    if (version < RaveIO_ODIM_Version_2_3) {
+      char* p = strstr(result, "WIGOS:");
+      if (p != NULL) {
+        sourceTokens = RaveUtilities_getTrimmedTokens(result, (int)',');
+        if (sourceTokens != NULL) {
+          int nlen = RaveList_size(sourceTokens);
+          int i = 0;
+          for (i = nlen - 1; i >= 0; i--) {
+            char* pToken = (char*)RaveList_get(sourceTokens, i);
+            if (pToken != NULL && strstr(pToken, "WIGOS")) {
+              pToken = (char*)RaveList_remove(sourceTokens, i);
+              RAVE_FREE(pToken);
+            }
+          }
+          nlen = RaveList_size(sourceTokens);
+          strcpy(result, "");
+          for (i = 0; i < nlen; i++) {
+            char* pToken = (char*)RaveList_get(sourceTokens, i);
+            if (i > 0) {
+              strcat(result, ",");
+            }
+            strcat(result, pToken);
+          }
+        }
+      }
+    }
+  }
+done:
+  if (sourceTokens != NULL) {
+    RaveList_freeAndDestroy(&sourceTokens);
+  }
+  return result;
+}
+
+int RaveUtilities_isSourceValid(const char* source, RaveIO_ODIM_Version version)
+{
+  int result = 0;
+  if (source != NULL) {
+    if (version >= RaveIO_ODIM_Version_2_4) {
+      if (strstr(source, "NOD:") != NULL || strstr(source, "ORG:") != NULL) {
+        result = 1;
+      } else {
+        RAVE_WARNING2("Source is not valid according to rules for version=%d, source=%s", version, source);
+      }
+    } else {
+      result = 1;
+    }
+  }
+  return result;
+}

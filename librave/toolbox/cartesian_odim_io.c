@@ -28,10 +28,13 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
 #include "rave_alloc.h"
 #include "raveobject_hashtable.h"
 #include "odim_io_utilities.h"
-
+#include <math.h>
 #include <string.h>
+#include "projection_pipeline.h"
+#include <stdlib.h>
 
 typedef struct CartesianOdimArg {
+  LazyNodeListReader_t* lazyReader; /**< the lazy node list reader */
   HL_NodeList* nodelist;
   RaveCoreObject* object;
   RaveObjectHashTable_t* attrs;
@@ -42,6 +45,9 @@ typedef struct CartesianOdimArg {
  */
 struct _CartesianOdimIO_t {
   RAVE_OBJECT_HEAD /** Always on top */
+  RaveIO_ODIM_Version version;
+  int strict; /**< if writing should be validated strictly or not */
+  char error_message[1024];                /**< if an error occurs during writing an error message might give you the reason */
 };
 
 /*@{ Private functions */
@@ -50,6 +56,10 @@ struct _CartesianOdimIO_t {
  */
 static int CartesianOdimIO_constructor(RaveCoreObject* obj)
 {
+  ((CartesianOdimIO_t*)obj)->version = RaveIO_ODIM_Version_2_4;
+  ((CartesianOdimIO_t*)obj)->strict = 1;
+  strcpy(((CartesianOdimIO_t*)obj)->error_message, "");
+
   return 1;
 }
 
@@ -58,6 +68,9 @@ static int CartesianOdimIO_constructor(RaveCoreObject* obj)
  */
 static int CartesianOdimIO_copyconstructor(RaveCoreObject* obj, RaveCoreObject* srcobj)
 {
+  ((CartesianOdimIO_t*)obj)->version = ((CartesianOdimIO_t*)srcobj)->version;
+  ((CartesianOdimIO_t*)obj)->strict = ((CartesianOdimIO_t*)srcobj)->strict;
+  strcpy(((CartesianOdimIO_t*)obj)->error_message, ((CartesianOdimIO_t*)srcobj)->error_message);
   return 1;
 }
 
@@ -68,6 +81,24 @@ static int CartesianOdimIO_copyconstructor(RaveCoreObject* obj, RaveCoreObject* 
 static void CartesianOdimIO_destructor(RaveCoreObject* obj)
 {
 }
+
+
+/**
+ * Checks if an environment variable has been set indicating that the cartesian legacy extent calculation
+ * should be performed. Environment variable RAVE_USE_CARTESIAN_LEGACY_EXTENT. Value = yes or true indicates
+ * that it should be used, otherwise it will not be used.
+ * return 1 if legacy extent should be used otherwise 0
+ */
+static int CartesianOdimIOInternal_useCartesianLegacyExtent(void) {
+  char* useCartesianLegacyExtent = getenv("RAVE_USE_CARTESIAN_LEGACY_EXTENT");
+  if (RaveUtilities_isLegacyProjEnabled() && useCartesianLegacyExtent != NULL) {
+    if (strcasecmp("yes", useCartesianLegacyExtent)==0 || strcasecmp("true", useCartesianLegacyExtent)==0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 
 /**
  * Gets the nodename/attribute value if nodename/data<index>/attribute doesn't exist.
@@ -293,8 +324,23 @@ static int CartesianOdimIOInternal_loadVolumeRootAttribute(void* object, RaveAtt
       goto done;
     }
     CartesianVolume_setYScale(volume, value);
+  } else if (strcasecmp("where/zscale", name)==0) {
+    double value = 0.0;
+    if (!(result = RaveAttribute_getDouble(attribute, &value))) {
+      RAVE_ERROR0("where/zscale not a double");
+      goto done;
+    }
+    CartesianVolume_setZScale(volume, value);
+  } else if (strcasecmp("where/zstart", name)==0) {
+    double value = 0.0;
+    if (!(result = RaveAttribute_getDouble(attribute, &value))) {
+      RAVE_ERROR0("where/zstart not a double");
+      goto done;
+    }
+    CartesianVolume_setZStart(volume, value);
   } else if (strcasecmp("where/xsize", name)==0 ||
-             strcasecmp("where/ysize", name)==0 ) {
+             strcasecmp("where/ysize", name)==0 ||
+             strcasecmp("where/zsize", name)==0) {
     result = 1;
   } else if (strcasecmp("where/LL_lon", name)==0 ||
              strcasecmp("where/LL_lat", name)==0 ||
@@ -325,6 +371,8 @@ static int CartesianOdimIOInternal_createExtent(RaveObjectHashTable_t* attrs, Pr
 {
   int result = 0;
 
+  ProjectionPipeline_t* pipeline = NULL;
+
   RAVE_ASSERT((attrs != NULL), "attrs == NULL");
   RAVE_ASSERT((projection != NULL), "projection == NULL");
   RAVE_ASSERT((llX != NULL), "llX == NULL");
@@ -337,6 +385,17 @@ static int CartesianOdimIOInternal_createExtent(RaveObjectHashTable_t* attrs, Pr
   *urX = 0.0;
   *urY = 0.0;
 
+  if (CartesianOdimIOInternal_useCartesianLegacyExtent()) {
+    /* Legacy variant excludes the +datum=WGS84 when calculating the extent when using pj_fwd and pj_inv */
+    pipeline = ProjectionPipeline_createPipelineFromDef("+proj=longlat +ellps=WGS84", Projection_getDefinition(projection));
+  } else {
+    pipeline = ProjectionPipeline_createDefaultLonLatPipeline(projection);
+  }
+  if (pipeline == NULL) {
+    RAVE_ERROR0("Could not create default lon/lat pipeline");
+    goto done;
+  }
+
   if (projection != NULL &&
       RaveObjectHashTable_exists(attrs, "where/LL_lon") &&
       RaveObjectHashTable_exists(attrs, "where/LL_lat") &&
@@ -347,12 +406,12 @@ static int CartesianOdimIOInternal_createExtent(RaveObjectHashTable_t* attrs, Pr
         RaveUtilities_getRaveAttributeDoubleFromHash(attrs, "where/LL_lat", &LL_lat) &&
         RaveUtilities_getRaveAttributeDoubleFromHash(attrs, "where/UR_lon", &UR_lon) &&
         RaveUtilities_getRaveAttributeDoubleFromHash(attrs, "where/UR_lat", &UR_lat)) {
-      if (!Projection_fwd(projection, LL_lon * M_PI/180.0, LL_lat * M_PI/180.0, llX, llY)) {
+      if (!ProjectionPipeline_fwd(pipeline, LL_lon * M_PI/180.0, LL_lat * M_PI/180.0, llX, llY)) {
         RAVE_ERROR0("Could not generate XY pair for LL");
         goto done;
       }
 
-      if (!Projection_fwd(projection, UR_lon * M_PI/180.0, UR_lat * M_PI/180.0, urX, urY)) {
+      if (!ProjectionPipeline_fwd(pipeline, UR_lon * M_PI/180.0, UR_lat * M_PI/180.0, urX, urY)) {
         RAVE_ERROR0("Could not generate XY pair for UR");
         goto done;
       }
@@ -360,6 +419,7 @@ static int CartesianOdimIOInternal_createExtent(RaveObjectHashTable_t* attrs, Pr
     }
   }
 done:
+  RAVE_OBJECT_RELEASE(pipeline);
   return result;
 }
 
@@ -382,6 +442,7 @@ static int CartesianOdimIOInternal_loadDatasetAttribute(void* object, RaveAttrib
   */
   name = RaveAttribute_getName(attribute);
   if (strcasecmp("what/product", name)==0 ||
+      strcasecmp("what/prodname", name)==0 ||
       strcasecmp("what/startdate", name)==0 ||
       strcasecmp("what/starttime", name)==0 ||
       strcasecmp("what/enddate", name)==0 ||
@@ -394,6 +455,8 @@ static int CartesianOdimIOInternal_loadDatasetAttribute(void* object, RaveAttrib
     }
     if (strcasecmp("what/product", name)==0) {
       result = Cartesian_setProduct(cartesian, RaveTypes_getProductTypeFromString(value));
+    } else if (strcasecmp("what/prodname", name)==0) {
+      result = Cartesian_setProdname(cartesian, value);
     } else if (strcasecmp("what/startdate", name)==0) {
       result = Cartesian_setStartDate(cartesian, value);
     } else if (strcasecmp("what/starttime", name)==0) {
@@ -487,11 +550,23 @@ done:
  * @param[in] dtype - the type of the data.
  * @return 1 on success otherwise 0
  */
-static int CartesianOdimIOInternal_loadDatasetDataDataset(void* object, hsize_t xsize, hsize_t ysize, void* data, RaveDataType dtype)
+static int CartesianOdimIOInternal_loadDatasetDataDataset(void* object, hsize_t xsize, hsize_t ysize, void* data, RaveDataType dtype, const char* nodeName)
 {
+  int result = 0;
   CartesianParam_t* param = (CartesianParam_t*)((CartesianOdimArg*)object)->object;
-
-  return CartesianParam_setData(param, xsize, ysize, data, dtype);
+  if (data == NULL && ((CartesianOdimArg*)object)->lazyReader != NULL) {
+    LazyDataset_t* datasetReader = RAVE_OBJECT_NEW(&LazyDataset_TYPE);
+    if (datasetReader != NULL) {
+      result = LazyDataset_init(datasetReader, ((CartesianOdimArg*)object)->lazyReader, nodeName);
+    }
+    if (result) {
+      result = CartesianParam_setLazyDataset(param, datasetReader);
+    }
+    RAVE_OBJECT_RELEASE(datasetReader);
+  } else {
+    result = CartesianParam_setData(param, xsize, ysize, data, dtype);
+  }
+  return result;
 }
 
 /**
@@ -501,7 +576,7 @@ static int CartesianOdimIOInternal_loadDatasetDataDataset(void* object, hsize_t 
  * @param[in] ... - the varargs
  * @return the parameter on success otherwise NULL
  */
-static CartesianParam_t* CartesianOdimIOInternal_loadCartesianParameter(HL_NodeList* nodelist, const char* fmt, ...)
+static CartesianParam_t* CartesianOdimIOInternal_loadCartesianParameter(LazyNodeListReader_t* lazyReader, const char* fmt, ...)
 {
   char nodeName[1024];
   CartesianParam_t* param = NULL;
@@ -512,7 +587,7 @@ static CartesianParam_t* CartesianOdimIOInternal_loadCartesianParameter(HL_NodeL
   va_list ap;
   int n = 0;
 
-  RAVE_ASSERT((nodelist != NULL), "nodelist == NULL");
+  RAVE_ASSERT((lazyReader != NULL), "nodelist == NULL");
 
   arg.attrs = NULL;
 
@@ -529,14 +604,15 @@ static CartesianParam_t* CartesianOdimIOInternal_loadCartesianParameter(HL_NodeL
     goto done;
   }
 
-  arg.nodelist = nodelist;
+  arg.lazyReader = lazyReader;
+  arg.nodelist = LazyNodeListReader_getHLNodeList(lazyReader);
   arg.object = (RaveCoreObject*)param;
   arg.attrs = RAVE_OBJECT_NEW(&RaveObjectHashTable_TYPE);
   if (arg.attrs == NULL) {
     goto done;
   }
 
-  if (!RaveHL_loadAttributesAndData(nodelist, &arg,
+  if (!RaveHL_loadAttributesAndData(arg.nodelist, &arg,
                                     CartesianOdimIOInternal_loadDatasetDataAttribute,
                                     CartesianOdimIOInternal_loadDatasetDataDataset,
                                     nodeName)) {
@@ -544,8 +620,8 @@ static CartesianParam_t* CartesianOdimIOInternal_loadCartesianParameter(HL_NodeL
   }
 
   pindex = 1;
-  while (RaveHL_hasNodeByName(nodelist, "%s/quality%d", nodeName, pindex)) {
-    field = OdimIoUtilities_loadField(nodelist, "%s/quality%d", nodeName, pindex);
+  while (RaveHL_hasNodeByName(arg.nodelist, "%s/quality%d", nodeName, pindex)) {
+    field = OdimIoUtilities_loadField(lazyReader, "%s/quality%d", nodeName, pindex);
     if (field == NULL ||
         !CartesianParam_addQualityField(param, field)) {
       RAVE_ERROR0("Failed to load quality field for parameter");
@@ -642,7 +718,7 @@ done:
  * @param[in] nodelist - the nodelist the nodes should be added to
  * @returns 1 on success otherwise 0
  */
-static int CartesianOdimIOInternal_addCartesianImageToNodeList(Cartesian_t* cartesian, HL_NodeList* nodelist, const char* fmt, ...)
+static int CartesianOdimIOInternal_addCartesianImageToNodeList(Cartesian_t* cartesian, RaveIO_ODIM_Version version, HL_NodeList* nodelist, const char* fmt, ...)
 {
   int result = 0;
   char nodeName[1024];
@@ -682,6 +758,18 @@ static int CartesianOdimIOInternal_addCartesianImageToNodeList(Cartesian_t* cart
       !RaveUtilities_addStringAttributeToList(attributes, "what/enddate", Cartesian_getEndDate(cartesian)) ||
       !RaveUtilities_addStringAttributeToList(attributes, "what/endtime", Cartesian_getEndTime(cartesian))) {
     goto done;
+  }
+
+  if (version >= RaveIO_ODIM_Version_2_3) {
+    if (Cartesian_getProdname(cartesian) == NULL) {
+      if (!RaveUtilities_addStringAttributeToList(attributes, "what/prodname", "BALTRAD cartesian")) {
+        goto done;
+      }
+    } else {
+      if (!RaveUtilities_addStringAttributeToList(attributes, "what/prodname", Cartesian_getProdname(cartesian))) {
+        goto done;
+      }
+    }
   }
 
   if (!RaveHL_addAttributes(nodelist, attributes, nodeName)) {
@@ -724,7 +812,7 @@ done:
  * @param[in] ... - the varargs list
  * @returns 1 on success otherwise 0
  */
-static int CartesianOdimIOInternal_fillCartesianDataset(HL_NodeList* nodelist, Cartesian_t* image, const char* fmt, ...)
+static int CartesianOdimIOInternal_fillCartesianDataset(LazyNodeListReader_t* lazyReader, Cartesian_t* image, const char* fmt, ...)
 {
   int result = 0;
   char nodeName[1024];
@@ -733,10 +821,11 @@ static int CartesianOdimIOInternal_fillCartesianDataset(HL_NodeList* nodelist, C
   int n = 0;
   int pindex = 0;
 
-  RAVE_ASSERT((nodelist != NULL), "nodelist == NULL");
+  RAVE_ASSERT((lazyReader != NULL), "lazyReader == NULL");
   RAVE_ASSERT((image != NULL), "image == NULL");
 
-  arg.nodelist = nodelist;
+  arg.lazyReader = lazyReader;
+  arg.nodelist = LazyNodeListReader_getHLNodeList(lazyReader);
   arg.object = (RaveCoreObject*)image;
 
   va_start(ap, fmt);
@@ -747,7 +836,7 @@ static int CartesianOdimIOInternal_fillCartesianDataset(HL_NodeList* nodelist, C
     goto done;
   }
 
-  if (!RaveHL_loadAttributesAndData(nodelist, &arg,
+  if (!RaveHL_loadAttributesAndData(arg.nodelist, &arg,
                                     CartesianOdimIOInternal_loadDatasetAttribute,
                                     NULL,
                                     nodeName)) {
@@ -756,29 +845,29 @@ static int CartesianOdimIOInternal_fillCartesianDataset(HL_NodeList* nodelist, C
   }
 
   pindex = 1;
-  while (RaveHL_hasNodeByName(nodelist, "%s/data%d", nodeName, pindex)) {
+  while (RaveHL_hasNodeByName(arg.nodelist, "%s/data%d", nodeName, pindex)) {
     double v = 0.0;
-    CartesianParam_t* param = CartesianOdimIOInternal_loadCartesianParameter(nodelist, "%s/data%d", nodeName, pindex);
+    CartesianParam_t* param = CartesianOdimIOInternal_loadCartesianParameter(lazyReader, "%s/data%d", nodeName, pindex);
     if (param == NULL) {
       RAVE_ERROR2("Failed to load cartesian parameter %s/data%d", nodeName, pindex);
       goto done;
     }
 
     /* Fix so that parameter contains all necessary stuff */
-    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(nodelist, nodeName, pindex, "what/gain", &v)) {
+    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(arg.nodelist, nodeName, pindex, "what/gain", &v)) {
       CartesianParam_setGain(param, v);
     }
-    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(nodelist, nodeName, pindex, "what/offset", &v)) {
+    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(arg.nodelist, nodeName, pindex, "what/offset", &v)) {
       CartesianParam_setOffset(param, v);
     }
-    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(nodelist, nodeName, pindex, "what/nodata", &v)) {
+    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(arg.nodelist, nodeName, pindex, "what/nodata", &v)) {
       CartesianParam_setNodata(param, v);
     }
-    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(nodelist, nodeName, pindex, "what/undetect", &v)) {
+    if (CartesianOdimIOInternal_getDatasetDoubleValueIfMissing(arg.nodelist, nodeName, pindex, "what/undetect", &v)) {
       CartesianParam_setUndetect(param, v);
     }
     if (CartesianParam_getQuantity(param) == NULL) {
-      RaveAttribute_t* attr = RaveHL_getAttribute(nodelist, "%s/what/quantity", nodeName);
+      RaveAttribute_t* attr = RaveHL_getAttribute(arg.nodelist, "%s/what/quantity", nodeName);
       char* value = NULL;
       if (attr == NULL) {
         RAVE_ERROR0("Could not find any quantity for cartesian parameter");
@@ -806,8 +895,8 @@ static int CartesianOdimIOInternal_fillCartesianDataset(HL_NodeList* nodelist, C
 
   result = 1;
   pindex = 1;
-  while (result == 1 && RaveHL_hasNodeByName(nodelist, "%s/quality%d", nodeName, pindex)) {
-    RaveField_t* field = OdimIoUtilities_loadField(nodelist, "%s/quality%d", nodeName, pindex);
+  while (result == 1 && RaveHL_hasNodeByName(arg.nodelist, "%s/quality%d", nodeName, pindex)) {
+    RaveField_t* field = OdimIoUtilities_loadField(lazyReader, "%s/quality%d", nodeName, pindex);
     if (field != NULL) {
       result = Cartesian_addQualityField(image, field);
     } else {
@@ -838,16 +927,28 @@ int CartesianOdimIOInternal_addLonLatExtentToAttributeList(RaveObjectList_t* att
   int result = 0;
   double LL_lat = 0.0, LL_lon = 0.0, LR_lat = 0.0, LR_lon = 0.0;
   double UL_lat = 0.0, UL_lon = 0.0, UR_lat = 0.0, UR_lon = 0.0;
+  ProjectionPipeline_t* pipeline = NULL;
 
+  if (CartesianOdimIOInternal_useCartesianLegacyExtent()) {
+    /* Legacy variant excludes the +datum=WGS84 when calculating the extent when using pj_fwd and pj_inv */
+    pipeline = ProjectionPipeline_createPipelineFromDef("+proj=longlat +ellps=WGS84", Projection_getDefinition(projection));
+  } else {
+    pipeline = ProjectionPipeline_createDefaultLonLatPipeline(projection);
+  }
+
+  if (pipeline == NULL) {
+    RAVE_ERROR0("Could not create default lon/lat pipeline");
+    goto done;
+  }
   RAVE_ASSERT((attrs != NULL), "attrs == NULL");
   RAVE_ASSERT((projection != NULL), "projection == NULL");
 
   // Generate the correct corner coordinates.
 
-  if (!Projection_inv(projection, llX, llY, &LL_lon, &LL_lat) ||
-      !Projection_inv(projection, llX, urY, &UL_lon, &UL_lat) ||
-      !Projection_inv(projection, urX, urY, &UR_lon, &UR_lat) ||
-      !Projection_inv(projection, urX, llY, &LR_lon, &LR_lat)) {
+  if (!ProjectionPipeline_inv(pipeline, llX, llY, &LL_lon, &LL_lat) ||
+      !ProjectionPipeline_inv(pipeline, llX, urY, &UL_lon, &UL_lat) ||
+      !ProjectionPipeline_inv(pipeline, urX, urY, &UR_lon, &UR_lat) ||
+      !ProjectionPipeline_inv(pipeline, urX, llY, &LR_lon, &LR_lat)) {
     RAVE_ERROR0("Failed to translate surface extent into lon/lat corner pairs\n");
     goto done;
   }
@@ -865,24 +966,55 @@ int CartesianOdimIOInternal_addLonLatExtentToAttributeList(RaveObjectList_t* att
 
   result = 1;
 done:
+  RAVE_OBJECT_RELEASE(pipeline);
   return result;
 }
 
 /*@} End of Private functions */
 
 /*@{ Interface functions */
+void CartesianOdimIO_setVersion(CartesianOdimIO_t* self, RaveIO_ODIM_Version version)
+{
+  RAVE_ASSERT((self != NULL), "self == NULL");
+  self->version = version;
+}
 
-int CartesianOdimIO_readCartesian(CartesianOdimIO_t* self, HL_NodeList* nodelist, Cartesian_t* cartesian)
+RaveIO_ODIM_Version CartesianOdimIO_getVersion(CartesianOdimIO_t* self)
+{
+  RAVE_ASSERT((self != NULL), "self == NULL");
+  return self->version;
+}
+
+void CartesianOdimIO_setStrict(CartesianOdimIO_t* self, int strict)
+{
+  RAVE_ASSERT((self != NULL), "self == NULL");
+  self->strict = strict;
+}
+
+int CartesianOdimIO_isStrict(CartesianOdimIO_t* self)
+{
+  RAVE_ASSERT((self != NULL), "self == NULL");
+  return self->strict;
+}
+
+const char* CartesianOdimIO_getErrorMessage(CartesianOdimIO_t* self)
+{
+  RAVE_ASSERT((self != NULL), "self == NULL");
+  return (const char*)self->error_message;
+}
+
+int CartesianOdimIO_readCartesian(CartesianOdimIO_t* self, LazyNodeListReader_t* lazyReader, Cartesian_t* cartesian)
 {
   int result = 0;
   CartesianOdimArg arg;
   Projection_t* proj = NULL;
 
   RAVE_ASSERT((self != NULL), "self == NULL");
-  RAVE_ASSERT((nodelist != NULL), "nodelist == NULL");
+  RAVE_ASSERT((lazyReader != NULL), "nodelist == NULL");
   RAVE_ASSERT((cartesian != NULL), "cartesian == NULL");
 
-  arg.nodelist = nodelist;
+  arg.lazyReader = lazyReader;
+  arg.nodelist = LazyNodeListReader_getHLNodeList(lazyReader);
   arg.object = (RaveCoreObject*)cartesian;
   arg.attrs = RAVE_OBJECT_NEW(&RaveObjectHashTable_TYPE);
   if (arg.attrs == NULL) {
@@ -890,7 +1022,7 @@ int CartesianOdimIO_readCartesian(CartesianOdimIO_t* self, HL_NodeList* nodelist
     goto done;
   }
 
-  if (!RaveHL_loadAttributesAndData(nodelist, &arg,
+  if (!RaveHL_loadAttributesAndData(arg.nodelist, &arg,
                                     CartesianOdimIOInternal_loadRootAttribute,
                                     NULL,
                                     "")) {
@@ -900,18 +1032,16 @@ int CartesianOdimIO_readCartesian(CartesianOdimIO_t* self, HL_NodeList* nodelist
 
   if ((proj = Cartesian_getProjection(cartesian)) != NULL) {
     double llX = 0.0, llY = 0.0, urX = 0.0, urY = 0.0;
-    double xscale = Cartesian_getXScale(cartesian);
-    double yscale = Cartesian_getYScale(cartesian);
 
     if (!CartesianOdimIOInternal_createExtent(arg.attrs, proj, &llX, &llY, &urX, &urY)) {
       goto done;
     }
-    Cartesian_setAreaExtent(cartesian, llX, llY, urX-xscale, urY-yscale);
+    Cartesian_setAreaExtent(cartesian, llX, llY, urX, urY);
   }
 
   RAVE_OBJECT_RELEASE(arg.attrs);
 
-  if (!CartesianOdimIOInternal_fillCartesianDataset(nodelist, cartesian, "/dataset1")) {
+  if (!CartesianOdimIOInternal_fillCartesianDataset(lazyReader, cartesian, "/dataset1")) {
     goto done;
   }
 
@@ -923,7 +1053,7 @@ done:
   return result;
 }
 
-int CartesianOdimIO_readVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, CartesianVolume_t* volume)
+int CartesianOdimIO_readVolume(CartesianOdimIO_t* self, LazyNodeListReader_t* lazyReader, CartesianVolume_t* volume)
 {
   int result = 0;
   CartesianOdimArg arg;
@@ -931,17 +1061,18 @@ int CartesianOdimIO_readVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
   Projection_t* proj = NULL;
 
   RAVE_ASSERT((self != NULL), "self == NULL");
-  RAVE_ASSERT((nodelist != NULL), "nodelist == NULL");
+  RAVE_ASSERT((lazyReader != NULL), "lazyReader == NULL");
   RAVE_ASSERT((volume != NULL), "volume == NULL");
 
-  arg.nodelist = nodelist;
+  arg.lazyReader = lazyReader;
+  arg.nodelist = LazyNodeListReader_getHLNodeList(lazyReader);
   arg.object = (RaveCoreObject*)volume;
   arg.attrs = RAVE_OBJECT_NEW(&RaveObjectHashTable_TYPE);
   if (arg.attrs == NULL) {
     RAVE_ERROR0("Failed to allocate memory");
     goto done;
   }
-  if (!RaveHL_loadAttributesAndData(nodelist, &arg,
+  if (!RaveHL_loadAttributesAndData(arg.nodelist, &arg,
                                     CartesianOdimIOInternal_loadVolumeRootAttribute,
                                     NULL,
                                     "")) {
@@ -950,20 +1081,19 @@ int CartesianOdimIO_readVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
   }
   if ((proj = CartesianVolume_getProjection(volume)) != NULL) {
     double llX = 0.0, llY = 0.0, urX = 0.0, urY = 0.0;
-    double xscale = CartesianVolume_getXScale(volume);
-    double yscale = CartesianVolume_getYScale(volume);
+
     if (!CartesianOdimIOInternal_createExtent(arg.attrs, proj, &llX, &llY, &urX, &urY)) {
       goto done;
     }
-    CartesianVolume_setAreaExtent(volume, llX, llY, urX-xscale, urY-yscale);
+    CartesianVolume_setAreaExtent(volume, llX, llY, urX, urY);
   }
 
   result = 1;
   index = 1;
-  while (result == 1 && RaveHL_hasNodeByName(nodelist, "/dataset%d", index)) {
+  while (result == 1 && RaveHL_hasNodeByName(arg.nodelist, "/dataset%d", index)) {
     Cartesian_t* image = RAVE_OBJECT_NEW(&Cartesian_TYPE);
     if (image != NULL) {
-      result = CartesianOdimIOInternal_fillCartesianDataset(nodelist, image, "/dataset%d", index);
+      result = CartesianOdimIOInternal_fillCartesianDataset(lazyReader, image, "/dataset%d", index);
       if (result == 1) {
         result = CartesianVolume_addImage(volume, image);
       }
@@ -988,13 +1118,20 @@ int CartesianOdimIO_fillImage(CartesianOdimIO_t* self, HL_NodeList* nodelist, Ca
   Projection_t* projection = NULL;
   RaveObjectList_t* qualityfields = NULL;
   RaveList_t* params = NULL;
+  char* source = NULL;
 
   RAVE_ASSERT((self != NULL), "self == NULL");
   RAVE_ASSERT((nodelist != NULL), "nodelist == NULL");
   RAVE_ASSERT((cartesian != NULL), "cartesian == NULL");
 
-  if (!CartesianOdimIO_isValidImage(cartesian) &&
-      !CartesianOdimIO_isValidVolumeImage(cartesian)) {
+  strcpy(self->error_message, "");
+  if (!CartesianOdimIO_isValidImageAddMsg(cartesian, self->error_message, 1024) &&
+      !CartesianOdimIO_isValidVolumeImageAddMsg(cartesian, self->error_message, 1024)) {
+    goto done;
+  }
+
+  if (!CartesianOdimIO_validateCartesianHowAttributes(self, cartesian)) {
+    RAVE_ERROR0("Could not validate cartesian how-attributes");
     goto done;
   }
 
@@ -1007,7 +1144,7 @@ int CartesianOdimIO_fillImage(CartesianOdimIO_t* self, HL_NodeList* nodelist, Ca
   }
 
   if (!RaveHL_hasNodeByName(nodelist, "/Conventions")) {
-    if (!RaveHL_createStringValue(nodelist, RAVE_ODIM_VERSION_2_2_STR, "/Conventions")) {
+    if (!RaveHL_createStringValue(nodelist, RaveHL_getOdimVersionString(self->version), "/Conventions")) {
       goto done;
     }
   }
@@ -1016,7 +1153,7 @@ int CartesianOdimIO_fillImage(CartesianOdimIO_t* self, HL_NodeList* nodelist, Ca
   if (attributes != NULL) {
     const char* objectType = RaveTypes_getStringFromObjectType(Cartesian_getObjectType(cartesian));
     if (!RaveUtilities_addStringAttributeToList(attributes, "what/object", objectType) ||
-        !RaveUtilities_replaceStringAttributeInList(attributes, "what/version", RAVE_ODIM_H5RAD_VERSION_2_2_STR)) {
+        !RaveUtilities_replaceStringAttributeInList(attributes, "what/version", RaveHL_getH5RadVersionStringFromOdimVersion(self->version))) {
       RAVE_ERROR0("Failed to add what/object or what/version to attributes");
       goto done;
     }
@@ -1027,20 +1164,25 @@ int CartesianOdimIO_fillImage(CartesianOdimIO_t* self, HL_NodeList* nodelist, Ca
 
   if (projection != NULL) {
     double llX = 0.0, llY = 0.0, urX = 0.0, urY = 0.0;
-    double xscale = Cartesian_getXScale(cartesian);
-    double yscale = Cartesian_getYScale(cartesian);
+
     if (!RaveUtilities_addStringAttributeToList(attributes, "where/projdef", Projection_getDefinition(projection))) {
       goto done;
     }
     Cartesian_getAreaExtent(cartesian, &llX, &llY, &urX, &urY);
-    if (!CartesianOdimIOInternal_addLonLatExtentToAttributeList(attributes, projection, llX, llY, urX + xscale, urY + yscale)) {
+    if (!CartesianOdimIOInternal_addLonLatExtentToAttributeList(attributes, projection, llX, llY, urX, urY)) {
       goto done;
     }
   }
 
+  source = RaveUtilities_handleSourceVersion(Cartesian_getSource(cartesian), self->version);
+  if (self->strict && !RaveUtilities_isSourceValid(source, self->version)) {
+    strcpy(self->error_message, "what/source is not valid, missing ORG or NOD?");
+    goto done;
+  }
+
   if (!RaveUtilities_addStringAttributeToList(attributes, "what/date", Cartesian_getDate(cartesian)) ||
       !RaveUtilities_addStringAttributeToList(attributes, "what/time", Cartesian_getTime(cartesian)) ||
-      !RaveUtilities_addStringAttributeToList(attributes, "what/source", Cartesian_getSource(cartesian)) ||
+      !RaveUtilities_addStringAttributeToList(attributes, "what/source", source) ||
       !RaveUtilities_addDoubleAttributeToList(attributes, "where/xscale", Cartesian_getXScale(cartesian)) ||
       !RaveUtilities_addDoubleAttributeToList(attributes, "where/yscale", Cartesian_getYScale(cartesian)) ||
       !RaveUtilities_replaceLongAttributeInList(attributes, "where/xsize", Cartesian_getXSize(cartesian)) ||
@@ -1066,6 +1208,18 @@ int CartesianOdimIO_fillImage(CartesianOdimIO_t* self, HL_NodeList* nodelist, Ca
       !RaveUtilities_replaceStringAttributeInList(attributes, "what/product",
                                                   RaveTypes_getStringFromProductType(Cartesian_getProduct(cartesian)))) {
     goto done;
+  }
+
+  if (self->version >= RaveIO_ODIM_Version_2_3) {
+    if (Cartesian_getProdname(cartesian) == NULL) {
+      if (!RaveUtilities_addStringAttributeToList(attributes, "what/prodname", "BALTRAD cartesian")) {
+        goto done;
+      }
+    } else {
+      if (!RaveUtilities_addStringAttributeToList(attributes, "what/prodname", Cartesian_getProdname(cartesian))) {
+        goto done;
+      }
+    }
   }
 
   if (!RaveHL_createGroup(nodelist,"/dataset1")) {
@@ -1102,6 +1256,7 @@ done:
   RAVE_OBJECT_RELEASE(attributes);
   RAVE_OBJECT_RELEASE(projection);
   RAVE_OBJECT_RELEASE(qualityfields);
+  RAVE_FREE(source);
   return result;
 }
 
@@ -1112,18 +1267,24 @@ int CartesianOdimIO_fillVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
   int i = 0;
   RaveObjectList_t* attributes = NULL;
   Projection_t* projection = NULL;
+  char* source = NULL;
 
   RAVE_ASSERT((self != NULL), "self == NULL");
   RAVE_ASSERT((nodelist != NULL), "nodelist == NULL");
   RAVE_ASSERT((volume != NULL), "volume == NULL");
 
   // First verify that no bogus data is entered into the system.
-  if (!CartesianOdimIO_isValidVolume(volume)) {
+  if (!CartesianOdimIO_isValidVolumeAddMsg(volume, self->error_message, 1024)) {
+    goto done;
+  }
+
+  if (!CartesianOdimIO_validateVolumeHowAttributes(self, volume)) {
+    RAVE_ERROR0("Could not validate volume how-attributes");
     goto done;
   }
 
   if (!RaveHL_hasNodeByName(nodelist, "/Conventions")) {
-    if (!RaveHL_createStringValue(nodelist, RAVE_ODIM_VERSION_2_2_STR, "/Conventions")) {
+    if (!RaveHL_createStringValue(nodelist, RaveHL_getOdimVersionString(self->version), "/Conventions")) {
       goto done;
     }
   }
@@ -1132,7 +1293,7 @@ int CartesianOdimIO_fillVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
   if (attributes != NULL) {
     const char* objectType = RaveTypes_getStringFromObjectType(CartesianVolume_getObjectType(volume));
     if (!RaveUtilities_addStringAttributeToList(attributes, "what/object", objectType) ||
-        !RaveUtilities_replaceStringAttributeInList(attributes, "what/version", RAVE_ODIM_H5RAD_VERSION_2_2_STR)) {
+        !RaveUtilities_replaceStringAttributeInList(attributes, "what/version", RaveHL_getH5RadVersionStringFromOdimVersion(self->version))) {
       RAVE_ERROR0("Failed to add what/object or what/version to attributes");
       goto done;
     }
@@ -1140,9 +1301,15 @@ int CartesianOdimIO_fillVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
     goto done;
   }
 
+  source = RaveUtilities_handleSourceVersion(CartesianVolume_getSource(volume), self->version);
+  if (self->strict && !RaveUtilities_isSourceValid(source, self->version)) {
+    strcpy(self->error_message, "what/source is not valid, missing ORG or NOD?");
+    goto done;
+  }
+
   if (!RaveUtilities_addStringAttributeToList(attributes, "what/date", CartesianVolume_getDate(volume)) ||
       !RaveUtilities_addStringAttributeToList(attributes, "what/time", CartesianVolume_getTime(volume)) ||
-      !RaveUtilities_addStringAttributeToList(attributes, "what/source", CartesianVolume_getSource(volume)) ||
+      !RaveUtilities_addStringAttributeToList(attributes, "what/source", source) ||
       !RaveUtilities_addDoubleAttributeToList(attributes, "where/xscale", CartesianVolume_getXScale(volume)) ||
       !RaveUtilities_addDoubleAttributeToList(attributes, "where/yscale", CartesianVolume_getYScale(volume)) ||
       !RaveUtilities_replaceLongAttributeInList(attributes, "where/xsize", CartesianVolume_getXSize(volume)) ||
@@ -1150,17 +1317,24 @@ int CartesianOdimIO_fillVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
     goto done;
   }
 
+  if (self->version >= RaveIO_ODIM_Version_2_3) {
+    if (!RaveUtilities_addDoubleAttributeToList(attributes, "where/zscale", CartesianVolume_getZScale(volume)) ||
+        !RaveUtilities_addDoubleAttributeToList(attributes, "where/zstart", CartesianVolume_getZStart(volume)) ||
+        !RaveUtilities_addLongAttributeToList(attributes, "where/zsize", CartesianVolume_getZSize(volume))) {
+      goto done;
+    }
+  }
+
   // Add projection + extent if possible
   projection = CartesianVolume_getProjection(volume);
   if (projection != NULL) {
     double llX = 0.0, llY = 0.0, urX = 0.0, urY = 0.0;
-    double xscale = CartesianVolume_getXScale(volume);
-    double yscale = CartesianVolume_getYScale(volume);
+
     if (!RaveUtilities_addStringAttributeToList(attributes, "where/projdef", Projection_getDefinition(projection))) {
       goto done;
     }
     CartesianVolume_getAreaExtent(volume, &llX, &llY, &urX, &urY);
-    if (!CartesianOdimIOInternal_addLonLatExtentToAttributeList(attributes, projection, llX, llY, urX+xscale, urY+yscale)) {
+    if (!CartesianOdimIOInternal_addLonLatExtentToAttributeList(attributes, projection, llX, llY, urX, urY)) {
       goto done;
     }
   }
@@ -1174,16 +1348,17 @@ int CartesianOdimIO_fillVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, C
   nrImages = CartesianVolume_getNumberOfImages(volume);
   for (i = 0; result == 1 && i < nrImages; i++) {
     Cartesian_t* image = CartesianVolume_getImage(volume, i);
-    result = CartesianOdimIOInternal_addCartesianImageToNodeList(image, nodelist, "/dataset%d", (i+1));
+    result = CartesianOdimIOInternal_addCartesianImageToNodeList(image, self->version, nodelist, "/dataset%d", (i+1));
     RAVE_OBJECT_RELEASE(image);
   }
 done:
   RAVE_OBJECT_RELEASE(attributes);
   RAVE_OBJECT_RELEASE(projection);
+  RAVE_FREE(source);
   return result;
 }
 
-int CartesianOdimIO_isValidImage(Cartesian_t* cartesian)
+int CartesianOdimIO_isValidImageAddMsg(Cartesian_t* cartesian, char* msg, int maxlen)
 {
   int result = 0;
   Projection_t* projection = NULL;
@@ -1193,11 +1368,17 @@ int CartesianOdimIO_isValidImage(Cartesian_t* cartesian)
   if (Cartesian_getDate(cartesian) == NULL ||
       Cartesian_getTime(cartesian) == NULL ||
       Cartesian_getSource(cartesian) == NULL) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "Date, Time and Source must be set", maxlen);
+    }
     RAVE_INFO0("Date, Time and Source must be set");
     goto done;
   }
 
   if ((projection = Cartesian_getProjection(cartesian)) == NULL) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "Projection must be defined for cartesian", maxlen);
+    }
     RAVE_INFO0("Projection must be defined for cartesian");
     goto done;
   }
@@ -1206,16 +1387,25 @@ int CartesianOdimIO_isValidImage(Cartesian_t* cartesian)
       Cartesian_getYSize(cartesian) == 0 ||
       Cartesian_getXScale(cartesian) == 0.0 ||
       Cartesian_getYScale(cartesian) == 0.0) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "x/y sizes and scales must be defined", maxlen);
+    }
     RAVE_INFO0("x/y sizes and scales must be defined");
     goto done;
   }
 
   if (Cartesian_getProduct(cartesian) == Rave_ProductType_UNDEFINED) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "product type must be defined", maxlen);
+    }
     RAVE_INFO0("product type must be defined");
     goto done;
   }
 
   if (Cartesian_getParameterCount(cartesian) <= 0) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "Must be at least on parameter in a cartesian product", maxlen);
+    }
     RAVE_INFO0("Must be at least on parameter in a cartesian product");
     goto done;
   }
@@ -1224,9 +1414,15 @@ int CartesianOdimIO_isValidImage(Cartesian_t* cartesian)
 done:
   RAVE_OBJECT_RELEASE(projection);
   return result;
+
 }
 
-int CartesianOdimIO_isValidVolumeImage(Cartesian_t* cartesian)
+int CartesianOdimIO_isValidImage(Cartesian_t* cartesian)
+{
+  return CartesianOdimIO_isValidImageAddMsg(cartesian, NULL, 0);
+}
+
+int CartesianOdimIO_isValidVolumeImageAddMsg(Cartesian_t* cartesian, char* msg, int maxlen)
 {
   int result = 0;
 
@@ -1236,6 +1432,9 @@ int CartesianOdimIO_isValidVolumeImage(Cartesian_t* cartesian)
       Cartesian_getStartTime(cartesian) == NULL ||
       Cartesian_getEndDate(cartesian) == NULL ||
       Cartesian_getEndTime(cartesian) == NULL) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "start and end date/time must be set", maxlen);
+    }
     RAVE_INFO0("start and end date/time must be set");
     goto done;
   }
@@ -1244,17 +1443,70 @@ int CartesianOdimIO_isValidVolumeImage(Cartesian_t* cartesian)
       Cartesian_getYSize(cartesian) == 0 ||
       Cartesian_getXScale(cartesian) == 0.0 ||
       Cartesian_getYScale(cartesian) == 0.0) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "x/y sizes and scales must be defined", maxlen);
+    }
     RAVE_INFO0("x/y sizes and scales must be defined");
     goto done;
   }
 
   if (Cartesian_getProduct(cartesian) == Rave_ProductType_UNDEFINED) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "product type must be defined", maxlen);
+    }
     RAVE_INFO0("product type must be defined");
     goto done;
   }
   if (Cartesian_getParameterCount(cartesian) <= 0) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "Must at least exist one parameter for a cartesian product", maxlen);
+    }
     RAVE_INFO0("Must at least exist one parameter for a cartesian product");
     goto done;
+  }
+
+  result = 1;
+done:
+  return result;
+
+}
+
+
+int CartesianOdimIO_isValidVolumeImage(Cartesian_t* cartesian)
+{
+  return CartesianOdimIO_isValidVolumeImageAddMsg(cartesian, NULL, 0);
+}
+
+int CartesianOdimIO_isValidVolumeAddMsg(CartesianVolume_t* volume, char* msg, int maxlen)
+{
+  int result = 0;
+  int ncartesians = 0;
+  int i = 0;
+  RAVE_ASSERT((volume != NULL), "volume == NULL");
+  if (CartesianVolume_getDate(volume) == NULL ||
+      CartesianVolume_getTime(volume) == NULL ||
+      CartesianVolume_getSource(volume) == NULL) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "date, time and source MUST be defined", maxlen);
+    }
+    RAVE_INFO0("date, time and source MUST be defined");
+    goto done;
+  }
+
+  ncartesians = CartesianVolume_getNumberOfImages(volume);
+  if (ncartesians <= 0) {
+    if (msg != NULL && maxlen > 0) {
+      strncpy(msg, "a cartesian volume must at least contains one product", maxlen);
+    }
+    RAVE_INFO0("a cartesian volume must at least contains one product");
+    goto done;
+  }
+
+  result = 1;
+  for (i = 0; result == 1 && i < ncartesians; i++) {
+    Cartesian_t* cartesian = CartesianVolume_getImage(volume, i);
+    result = CartesianOdimIO_isValidVolumeImageAddMsg(cartesian, msg, maxlen);
+    RAVE_OBJECT_RELEASE(cartesian);
   }
 
   result = 1;
@@ -1264,32 +1516,53 @@ done:
 
 int CartesianOdimIO_isValidVolume(CartesianVolume_t* volume)
 {
+  return CartesianOdimIO_isValidVolumeAddMsg(volume, NULL, 0);
+}
+
+int CartesianOdimIO_validateVolumeHowAttributes(CartesianOdimIO_t* self, CartesianVolume_t* volume)
+{
   int result = 0;
-  int ncartesians = 0;
-  int i = 0;
-  RAVE_ASSERT((volume != NULL), "volume == NULL");
-  if (CartesianVolume_getDate(volume) == NULL ||
-      CartesianVolume_getTime(volume) == NULL ||
-      CartesianVolume_getSource(volume) == NULL) {
-    RAVE_INFO0("date, time and source MUST be defined");
-    goto done;
+  RAVE_ASSERT((self != NULL), "self == NULL");
+
+  if (!self->strict) {
+    return 1;
   }
 
-  ncartesians = CartesianVolume_getNumberOfImages(volume);
-  if (ncartesians <= 0) {
-    RAVE_INFO0("a cartesian volume must at least contains one product");
-    goto done;
+  if (self->version >= RaveIO_ODIM_Version_2_4) {
+    int gotSimulated = CartesianVolume_hasAttribute(volume, "how/simulated");
+    if (!gotSimulated) {
+      int i = 0, nrimages = CartesianVolume_getNumberOfImages(volume);
+      gotSimulated = 1;
+      for (i = 0; i < nrimages && gotSimulated; i++) {
+        Cartesian_t* image = CartesianVolume_getImage(volume, i);
+        gotSimulated = Cartesian_hasAttribute(image, "how/simulated");
+        RAVE_OBJECT_RELEASE(image);
+      }
+    }
+    if (!gotSimulated) {
+      RAVE_ERROR0("Failed to validate how attributes for volume. Missing required attribute in either volume or image");
+      strcpy(self->error_message, "Failed to validate how attributes for volume. Missing required attribute in either volume or image");
+    }
+    result = gotSimulated;
   }
+  return result;
+}
 
-  result = 1;
-  for (i = 0; result == 1 && i < ncartesians; i++) {
-    Cartesian_t* cartesian = CartesianVolume_getImage(volume, i);
-    result = CartesianOdimIO_isValidVolumeImage(cartesian);
-    RAVE_OBJECT_RELEASE(cartesian);
+int CartesianOdimIO_validateCartesianHowAttributes(CartesianOdimIO_t* self, Cartesian_t* image)
+{
+  int result = 0;
+  RAVE_ASSERT((self != NULL), "self == NULL");
+  if (!self->strict) {
+    return 1;
   }
-
-  result = 1;
-done:
+  if (self->version >= RaveIO_ODIM_Version_2_4) {
+    int gotSimulated = Cartesian_hasAttribute(image, "how/simulated");
+    if (!gotSimulated) {
+      RAVE_ERROR0("Failed to validate how attributes for cartesian image. Missing required attribute.");
+      strcpy(self->error_message, "Failed to validate how attributes for volume. Missing required attribute.");
+    }
+    result = gotSimulated;
+  }
   return result;
 }
 

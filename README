@@ -7,7 +7,8 @@ Swedish Meteorological and Hydrological Institute
 
 January 2012
 
-<caveats>
+
+<caveats> 
 RAVE has been developed on Ubuntu starting at version 8.04, and OSX. 
 It has  been verified on a number of other systems too (see below). 
 Your experiences may differ when building RAVE, and the software on
@@ -39,6 +40,7 @@ Debian 6 (Squeeze)
 CentOS 5.3, 5.4, 5.5 (Final), and 5.7 (Final)
 Red Hat Enterprise 6
 Mac OSX 10.5 (Leopard), 10.6 (Snow Leopard), 10.8 (Mountain Lion)
+
 
 
 ZLIB (optional)

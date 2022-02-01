@@ -24,15 +24,15 @@
 ###########################################################################
 -include ../def.mk
 
-CFLAGS= $(CCSHARED) $(OPTS) $(DEFS) -I../librave/toolbox -I../librave/pyapi -I../librave/tnc \
+CFLAGS= $(CCSHARED) $(OPTS) $(DEFS) -I../librave/toolbox -I../librave/pyapi  -I../librave/radvol/lib \
 			-I../librave/scansun -I. $(INCLUDE_PYTHON) \
-			-I$(HLHDF_INCLUDE_DIR) $(NUMPY_INCLUDE_DIR) \
-			$(ZLIB_INCDIR) $(HDF5_INCDIR) $(PROJ_INCLUDE_DIR)
+			-I$(HLHDF_INCLUDE_DIR) $(PROJ_INCLUDE_DIR) $(NUMPY_INCLUDE_DIR) \
+			$(ZLIB_INCDIR) $(HDF5_INCDIR)
 
 # Linker flags
 #
-LDFLAGS= -L../librave/toolbox -L../librave/pyapi -L../librave/tnc -L../librave/scansun -L. \
-			-L$(HLHDF_LIB_DIR) $(ZLIB_LIBDIR) $(HDF5_LIBDIR) $(PROJ_LIB_DIR)
+LDFLAGS= -L../librave/toolbox -L../librave/pyapi -L../librave/scansun -L. \
+			-L$(HLHDF_LIB_DIR) $(PROJ_LIB_DIR) $(ZLIB_LIBDIR) $(HDF5_LIBDIR)
 
 ifeq ($(EXPAT_SUPPRESSED), no)
 CFLAGS+= -I../librave/radvol/lib $(EXPAT_INCLUDE_DIR) -DRAVE_XML_SUPPORTED  
@@ -60,7 +60,7 @@ CFLAGS+= -DPTHREAD_SUPPORTED
 PTHREAD_LIBRARY=-lpthread
 endif
 
-LIBRARIES= -lravetoolbox -lravepyapi -lhlhdf -lproj -lravetnc  $(EXPAT_LIBRARY) $(BUFR_LIBRARY) $(NETCDF_LIBRARY) $(PTHREAD_LIBRARY)
+LIBRARIES= -lravetoolbox -lravepyapi -lhlhdf -lproj  $(EXPAT_LIBRARY) $(BUFR_LIBRARY) $(NETCDF_LIBRARY) $(PTHREAD_LIBRARY)
 
 # --------------------------------------------------------------------
 # Fixed definitions
@@ -213,20 +213,33 @@ SOURCE_37= pyctfilter.c
 OBJECTS_37= $(SOURCE_37:.c=.o)
 TARGET_37= _ctfilter.so
 
-SOURCE_38= pyvprcorrection.c
-OBJECTS_38= $(SOURCE_38:.c=.o)
-TARGET_38= _vprcorrection.so
+#SOURCE_38= pyvprcorrection.c
+#OBJECTS_38= $(SOURCE_38:.c=.o)
+#TARGET_38= _vprcorrection.so
 
 SOURCE_39= pybitmapgenerator.c
 OBJECTS_39= $(SOURCE_39:.c=.o)
 TARGET_39= _bitmapgenerator.so
 
+SOURCE_40= pyravedata2d.c
+OBJECTS_40= $(SOURCE_40:.c=.o)
+TARGET_40= _ravedata2d.so
+
+SOURCE_41= pylazynodelistreader.c
+OBJECTS_41= $(SOURCE_41:.c=.o)
+TARGET_41= _lazynodelistreader.so
+
+SOURCE_42= pyprojectionpipeline.c
+OBJECTS_42= $(SOURCE_42:.c=.o)
+TARGET_42= _projectionpipeline.so
+
 TARGETS=$(TARGET_1) $(TARGET_2) $(TARGET_3) $(TARGET_4) $(TARGET_5) $(TARGET_6) \
-		$(TARGET_7) $(TARGET_8) $(TARGET_9) $(TARGET_10) $(TARGET_11) $(TARGET_12) \
-		$(TARGET_13) $(TARGET_14) $(TARGET_15) $(TARGET_16) $(TARGET_17) $(TARGET_18) \
-		$(TARGET_19) $(TARGET_20) $(TARGET_21) $(TARGET_24) $(TARGET_25) $(TARGET_26) \
-		$(TARGET_27) $(TARGET_28) $(TARGET_29) $(TARGET_30) $(TARGET_31) $(TARGET_33) $(TARGET_34) $(TARGET_35) \
-		$(TARGET_36) $(TARGET_37) $(TARGET_38) $(TARGET_39)
+		$(TARGET_7) $(TARGET_8) $(TARGET_9) $(TARGET_10) $(TARGET_11) $(TARGET_12) $(TARGET_13) \
+		$(TARGET_14) $(TARGET_15) $(TARGET_16) $(TARGET_17) $(TARGET_18) $(TARGET_19) \
+		$(TARGET_20) $(TARGET_21) $(TARGET_24) $(TARGET_25) \
+		$(TARGET_26) $(TARGET_27) $(TARGET_28) $(TARGET_29) $(TARGET_30) $(TARGET_31) \
+		$(TARGET_33) $(TARGET_34) $(TARGET_35) $(TARGET_36) $(TARGET_37) \
+		$(TARGET_39) $(TARGET_40) $(TARGET_41) $(TARGET_42)
 
 INSTALL_HEADERS= pyarea.h \
 				 pycartesian.h \
@@ -250,13 +263,22 @@ INSTALL_HEADERS= pyarea.h \
 				 pycartesiancomposite.h \
 				 pyqitotal.h \
 				 pygra.h \
-				 pyvprcorrection.h \
-				 pybitmapgenerator.h
+				 pybitmapgenerator.h \
+				 pyravedata2d.h \
+				 pylazynodelistreader.h \
+				 pyprojectionpipeline.h
 
 ifeq ($(EXPAT_SUPPRESSED), no)
 TARGETS += $(TARGET_22) $(TARGET_23) $(TARGET_32)
 INSTALL_HEADERS += pyprojectionregistry.h pyarearegistry.h
 endif
+
+# We reset TARGETS and INSTALL_HEADERS if we shouldn't compile for python. That way we don't need to destroy anything
+ifeq ($(COMPILE_FOR_PYTHON), no)
+TARGETS=
+INSTALL_HEADERS=
+endif
+
 
 MAKECDEPEND=$(CC) -MM $(CFLAGS) -MT '$(@D)/$(@F)' -o $(DF).d $<
 
@@ -390,6 +412,16 @@ $(TARGET_38): $(DEPDIR) $(OBJECTS_38) ../librave/toolbox/libravetoolbox.so ../li
 $(TARGET_39): $(DEPDIR) $(OBJECTS_39) ../librave/toolbox/libravetoolbox.so ../librave/pyapi/libravepyapi.so
 	$(LDSHARED) -o $@ $(OBJECTS_39) $(LDFLAGS) $(LIBRARIES)
 
+$(TARGET_40): $(DEPDIR) $(OBJECTS_40) ../librave/toolbox/libravetoolbox.so ../librave/pyapi/libravepyapi.so
+	$(LDSHARED) -o $@ $(OBJECTS_40) $(LDFLAGS) $(LIBRARIES)
+
+$(TARGET_41): $(DEPDIR) $(OBJECTS_41) ../librave/toolbox/libravetoolbox.so ../librave/pyapi/libravepyapi.so
+	$(LDSHARED) -o $@ $(OBJECTS_41) $(LDFLAGS) $(LIBRARIES)
+
+$(TARGET_42): $(DEPDIR) $(OBJECTS_42) ../librave/toolbox/libravetoolbox.so ../librave/pyapi/libravepyapi.so
+	$(LDSHARED) -o $@ $(OBJECTS_42) $(LDFLAGS) $(LIBRARIES)
+
+ifeq ($(COMPILE_FOR_PYTHON), yes)
 .PHONY=install
 install:
 	@mkdir -p ${DESTDIR}${prefix}/Lib
@@ -402,6 +434,11 @@ install:
 	do \
 		"$(HLHDF_INSTALL_BIN)" -f -o -m644 -C $$i "${DESTDIR}$(prefix)/include/python/$$i"; \
 	done
+else
+.PHONY=install
+install:
+	:
+endif
 
 .PHONY=clean
 clean:
@@ -467,5 +504,8 @@ endif
 -include $(SOURCE_35:%.c=$(DEPDIR)/%.P)
 -include $(SOURCE_36:%.c=$(DEPDIR)/%.P)
 -include $(SOURCE_37:%.c=$(DEPDIR)/%.P)
--include $(SOURCE_38:%.c=$(DEPDIR)/%.P)
+#-include $(SOURCE_38:%.c=$(DEPDIR)/%.P)
 -include $(SOURCE_39:%.c=$(DEPDIR)/%.P)
+-include $(SOURCE_40:%.c=$(DEPDIR)/%.P)
+-include $(SOURCE_41:%.c=$(DEPDIR)/%.P)
+-include $(SOURCE_42:%.c=$(DEPDIR)/%.P)

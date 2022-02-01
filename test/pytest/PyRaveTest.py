@@ -36,7 +36,7 @@ class PyRaveTest(unittest.TestCase):
       modulebuilt=True
     except:
       pass
-    self.assertEquals(modulebuilt, _rave.isXmlSupported())
+    self.assertEqual(modulebuilt, _rave.isXmlSupported())
 
   def testCompareDateTime_1(self):
     self.assertEqual(0, _rave.compare_datetime("20171030","013059", "20171030","013059")) 
@@ -57,11 +57,11 @@ class PyRaveTest(unittest.TestCase):
     for r in result:
       if r[0] == name:
         if isinstance(value, str):
-          self.assertEquals(value, r[1])
+          self.assertEqual(value, r[1])
         elif isinstance(value, float):
           self.assertAlmostEqual(value, r[1], 4)
         elif isinstance(value, list):
-          self.assertEquals(len(value), len(r[1]))
+          self.assertEqual(len(value), len(r[1]))
           idx = 0
           for i in value:
             self.assertAlmostEqual(i, r[1][idx])
@@ -71,7 +71,7 @@ class PyRaveTest(unittest.TestCase):
 
 
   def test_translate_from_projection_to_wkt_aea(self):
-    proj = _rave.projection("myid", "aea", "+proj=aea +lat_0=1 +lon_0=2 +x_0=14 +y_0=60 +lat_1=12 +lat_2=13")
+    proj = _rave.projection("myid", "aea", "+proj=aea +lat_0=1 +lon_0=2 +x_0=14 +y_0=60 +lat_1=12 +lat_2=13 +a=6378160 +b=6356775")
     result = _rave.translate_from_projection_to_wkt(proj)
     self.check_value_in_list(result, "grid_mapping_name", "albers_conical_equal_area")
     self.check_value_in_list(result, "latitude_of_projection_origin", 1.0)
@@ -101,7 +101,7 @@ class PyRaveTest(unittest.TestCase):
     self.check_value_in_list(result, "earth_radius", 6378137.0)
     
   def test_translate_from_projection_to_wkt_lcc(self):
-    proj = _rave.projection("myid", "lcc", "+proj=lcc +lat_0=1 +lon_0=2 +x_0=14 +y_0=60 +lat_1=12 +lat_2=13")
+    proj = _rave.projection("myid", "lcc", "+proj=lcc +lat_0=1 +lon_0=2 +x_0=14 +y_0=60 +lat_1=12 +lat_2=13 +a=6378160 +b=6356775")
     result = _rave.translate_from_projection_to_wkt(proj)
     self.check_value_in_list(result, "grid_mapping_name", "lambert_conformal_conic")
     self.check_value_in_list(result, "latitude_of_projection_origin", 1.0)
@@ -128,6 +128,9 @@ class PyRaveTest(unittest.TestCase):
     self.check_value_in_list(result, "standard_parallel", 0.0)
     self.check_value_in_list(result, "scale_factor_at_projection_origin", 1.0)
     self.check_value_in_list(result, "earth_radius", 6378137.0)
+
+  def test_ebase_product_type(self):
+    self.assertEqual(19, _rave.Rave_ProductType_EBASE)
 
 if __name__ == "__main__":
   unittest.main()

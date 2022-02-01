@@ -25,8 +25,7 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef RADARDEFINITION_H
 #define RADARDEFINITION_H
-
-#include "rave_transform.h"
+#include "rave_proj.h"
 #include "projection.h"
 #include "rave_object.h"
 
@@ -184,6 +183,30 @@ void RadarDefinition_setBeamwidth(RadarDefinition_t* radar, double bw);
  * @returns the beam width
  */
 double RadarDefinition_getBeamwidth(RadarDefinition_t* radar);
+
+/**
+ * @param[in] radar - self
+ * @param[in] bw - the horizontal beam width to set
+ */
+void RadarDefinition_setBeamwH(RadarDefinition_t* radar, double bw);
+
+/**
+ * @param[in] radar - self
+ * @returns the horizontal beam width
+ */
+double RadarDefinition_getBeamwH(RadarDefinition_t* radar);
+
+/**
+ * @param[in] radar - self
+ * @param[in] bw - the vertical beam width to set
+ */
+void RadarDefinition_setBeamwV(RadarDefinition_t* radar, double bw);
+
+/**
+ * @param[in] radar - self
+ * @returns the vertical beam width
+ */
+double RadarDefinition_getBeamwV(RadarDefinition_t* radar);
 
 /**
  * @param[in] radar - self

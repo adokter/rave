@@ -4,7 +4,7 @@
  * @author Daniel Michelson (Swedish Meteorological and Hydrological Institute, SMHI)
  * @date 2006-
  */
-#include <Python.h>
+#include <pyravecompat.h>
 #include <arrayobject.h>
 #include "rave.h"
 
@@ -174,9 +174,9 @@ static PyObject* _read_h5rad_func(PyObject* self, PyObject* args)
     }
   }
   if (trafo.inpj)
-    pj_free(trafo.inpj);
+    freeProjection(trafo.inpj);
   if (trafo.outpj)
-    pj_free(trafo.outpj);
+    freeProjection(trafo.outpj);
   PyErr_Clear();
   Py_INCREF(Py_None);
   return Py_None;
@@ -280,18 +280,19 @@ static PyObject* _test_h5rad_func(PyObject* self, PyObject* args)
   }
 
   if (trafo.inpj)
-    pj_free(trafo.inpj);
+    freeProjection(trafo.inpj);
   if (trafo.outpj)
-    pj_free(trafo.outpj);
+    freeProjection(trafo.outpj);
   PyErr_Clear();
   Py_INCREF(Py_None);
   return Py_None;
-  fail: free_rave_object(&inrave);
+fail:
+  free_rave_object(&inrave);
   free_rave_object(&outrave);
   if (trafo.inpj)
-    pj_free(trafo.inpj);
+    freeProjection(trafo.inpj);
   if (trafo.outpj)
-    pj_free(trafo.outpj);
+    freeProjection(trafo.outpj);
   return NULL;
 }
 
@@ -358,14 +359,23 @@ static struct PyMethodDef _h5rad_functions[] =
 /**
  * Initializes the python module _h5rad.
  */
-PyMODINIT_FUNC init_h5rad(void)
+MOD_INIT(_h5rad)
 {
-  PyObject* m;
-  m = Py_InitModule("_h5rad", _h5rad_functions);
-  ErrorObject = PyString_FromString("_h5rad.error");
-  if (ErrorObject == NULL || PyDict_SetItemString(PyModule_GetDict(m), "error",
-                                                  ErrorObject) != 0)
+  PyObject* module = NULL;
+  PyObject* dictionary = NULL;
+
+  MOD_INIT_DEF(module, "_h5rad", NULL/*doc*/, _h5rad_functions);
+  if (module == NULL) {
+    return MOD_INIT_ERROR;
+  }
+
+  dictionary = PyModule_GetDict(module);
+  ErrorObject = PyErr_NewException("_h5rad.error", NULL, NULL);
+  if (ErrorObject == NULL || PyDict_SetItemString(dictionary, "error", ErrorObject) != 0) {
     Py_FatalError("Can't define _h5rad.error");
+    return MOD_INIT_ERROR;
+  }
 
   import_array(); /*Access to the Numeric PyArray functions*/
+  return MOD_INIT_SUCCESS(module);
 }

@@ -14,18 +14,22 @@ import _raveio
 from numpy import nan
 import rave_pgf_scansun_plugin, odim_source
 from rave_defines import UTF8
-from exceptions import SystemError
+#from exceptions import SystemError
 
 class RaveScansun(unittest.TestCase):
 
     # sehem PVOL with a sunhit, code running using startazT and stopazT
     SEHEM_TESTFILE = "fixtures/sehem_pvol_pn215_20171204T071500Z_0x81540b.h5"
+    
+    # Tries a corrupt file
+    SEHEM_TESTFILE_2 = "fixtures/sehem_pvol_pn215_20190907T081000Z_0x81540b.h5"
+    
     # Validation is done versus:
     # Date    Time   Elevatn Azimuth ElevSun AzimSun   N  dBSunFlux   SunMean SunStdd   ZdrMean ZdrStdd Refl  ZDR
     VALID_SEHEM = ('WMO:02588,RAD:SE47,PLC:Hemse(Ase),NOD:sehem,ORG:82,CTY:643,CMT:Swedish radar',
                    [(20171204, 71512.88111114502, 0.4998779296875, 134.6209716796875,
-                     0.004663761840869546, 134.5596655914249, 68, 14.660277444210697,
-                     -113.47691893156195, 1.0282557125640615, nan, nan, 'TH', 'NA')])
+                     0.004663761840869546, 134.5596655914249, 68, 15.452089904686948,
+                     -112.6851064710857, 1.0282557125640615, nan, nan, 'TH', 'NA')])
 
     # KNMI PVOL from Den Helder with a nice sun hit
     KNMI_TESTFILE="fixtures/KNMI-PVOL-Den_Helder.h5"
@@ -144,6 +148,12 @@ class RaveScansun(unittest.TestCase):
         self.assertEqual(self.VALID[1][0][12], result[1][0][12])
         self.assertEqual(self.VALID[1][0][13], result[1][0][13])
 
+    def testScansun_corrupt_file(self):
+        try:
+          _scansun.scansun(self.SEHEM_TESTFILE_2)
+          self.fail("Expected IOError")
+        except IOError:
+          pass
 
     def testWriteHits(self):
         source = odim_source.SOURCE['nldhl'].encode(UTF8)  # Non-compliant ODIM source in fixture...
@@ -163,7 +173,7 @@ class RaveScansun(unittest.TestCase):
           _scansun.scansun(self.CORRUPT_SEKKR_TESTFILE)
           self.assertTrue(False, "An exception should be thrown for corrupt file.")
         except Exception as e:
-          self.assertTrue(type(e) == SystemError, "Exception caught should be of type SystemError.")
+          self.assertTrue(type(e) == IOError, "Exception caught should be of type IOError.")
       
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.testName']

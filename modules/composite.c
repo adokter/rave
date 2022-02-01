@@ -4,7 +4,7 @@
  * @author Daniel Michelson (Swedish Meteorological and Hydrological Institute, SMHI)
  * @date 2006-
  */
-#include <Python.h>
+#include <pyravecompat.h>
 #include <arrayobject.h>
 #include "rave.h"
 
@@ -621,9 +621,18 @@ static PyObject* _nearest_composite(PyObject* self, PyObject* args)
     }
     Py_DECREF(po);
 
+#ifdef USE_PROJ4_API
     here.u *= DEG_TO_RAD;
     here.v *= DEG_TO_RAD;
     here_c = pj_fwd(here, wrap.proj);
+#else
+    {
+      PJ_COORD pjhere, pjhere_c;
+      pjhere.uv = here;
+      pjhere_c = proj_trans(wrap.proj, PJ_FWD, pjhere);
+      here_c = pjhere_c.uv;
+    }
+#endif
     wrap.rad[i].cx = (int) ((here_c.u - wrap.ux) / wrap.xscale);
     wrap.rad[i].cy = (int) ((wrap.uy - here_c.v) / wrap.yscale);
   }
@@ -634,7 +643,7 @@ static PyObject* _nearest_composite(PyObject* self, PyObject* args)
     createSurroundingXBitmap(&wrap);
     createSurroundingYBitmap(&wrap);
   }
-  pj_free(wrap.proj);
+  freeProjection(wrap.proj);
   free(wrap.rad);
 
   PyErr_Clear();
@@ -764,9 +773,18 @@ static PyObject* _lowest_composite(PyObject* self, PyObject* args)
     }
     Py_DECREF(po);
 
+#ifdef USE_PROJ4_API
     here.u *= DEG_TO_RAD;
     here.v *= DEG_TO_RAD;
     here_c = pj_fwd(here, wrap.proj);
+#else
+    {
+      PJ_COORD pjhere, pjhere_c;
+      pjhere.uv = here;
+      pjhere_c = proj_trans(wrap.proj, PJ_FWD, pjhere);
+      here_c = pjhere_c.uv;
+    }
+#endif
     wrap.rad[i].cx = (int) ((here_c.u - wrap.ux) / wrap.xscale);
     wrap.rad[i].cy = (int) ((wrap.uy - here_c.v) / wrap.yscale);
   }
@@ -777,7 +795,7 @@ static PyObject* _lowest_composite(PyObject* self, PyObject* args)
     createSurroundingXBitmap(&wrap);
     createSurroundingYBitmap(&wrap);
   }
-  pj_free(wrap.proj);
+  freeProjection(wrap.proj);
   free(wrap.rad);
 
   PyErr_Clear();
@@ -805,15 +823,24 @@ static struct PyMethodDef _composite_functions[] =
 /**
  * Initializes the python mode _composite.
  */
-PyMODINIT_FUNC init_composite(void)
+MOD_INIT(_composite)
 {
-  PyObject* m;
-  m = Py_InitModule("_composite", _composite_functions);
-  ErrorObject = PyString_FromString("_composite.error");
-  if (ErrorObject == NULL || PyDict_SetItemString(PyModule_GetDict(m), "error",
-                                                  ErrorObject) != 0)
+  PyObject* module = NULL;
+  PyObject* dictionary = NULL;
+
+  MOD_INIT_DEF(module, "_composite", NULL/*doc*/, _composite_functions);
+  if (module == NULL) {
+    return MOD_INIT_ERROR;
+  }
+  dictionary = PyModule_GetDict(module);
+
+  ErrorObject = PyErr_NewException("_composite.error", NULL, NULL);
+  if (ErrorObject == NULL || PyDict_SetItemString(dictionary, "error", ErrorObject) != 0) {
     Py_FatalError("Can't define _composite.error");
+    return MOD_INIT_ERROR;
+  }
 
   import_array(); /*To make sure I get access to the Numeric PyArray functions*/
+  return MOD_INIT_SUCCESS(module);
 }
 

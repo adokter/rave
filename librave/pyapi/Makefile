@@ -1,19 +1,25 @@
 -include ../../def.mk
 
 CFLAGS=	$(OPTS) $(CCSHARED) $(DEFS) $(CREATE_ITRUNC) \
-	-I. -I../toolbox $(NUMPY_INCLUDE_DIR) $(INCLUDE_PYTHON) -I$(HLHDF_INCLUDE_DIR) \
-	$(ZLIB_INCDIR) $(HDF5_INCDIR) $(PROJ_INCLUDE_DIR)
+	-I. -I../toolbox $(NUMPY_INCLUDE_DIR) $(INCLUDE_PYTHON) -I$(HLHDF_INCLUDE_DIR) $(PROJ_INCLUDE_DIR) \
+	$(ZLIB_INCDIR) $(HDF5_INCDIR)
 
 # --------------------------------------------------------------------
 # Fixed definitions
 
-RAVESOURCES=getpy.c h5rad.c rave.c
+RAVESOURCES=getpy.c h5rad.c rave.c pyravecompat.c
 INSTALL_HEADERS= getpy.h h5rad.h rave.h
 RAVEOBJS=	$(RAVESOURCES:.c=.o)
 LIBRAVEPYAPI=	libravepyapi.so
 MAKEDEPEND=gcc -MM $(CFLAGS) -o $(DF).d $<
 DEPDIR=.dep
 DF=$(DEPDIR)/$(*F)
+
+# We reset TARGETS and INSTALL_HEADERS if we shouldn't compile for python. That way we don't need to destroy anything
+ifeq ($(COMPILE_FOR_PYTHON), no)
+LIBRAVEPYAPI=
+INSTALL_HEADERS=
+endif
 
 # Get the dependencies in place, could be commented out if
 # dependency generation not is supported by the compiler.
@@ -42,6 +48,7 @@ all: $(LIBRAVEPYAPI)
 $(LIBRAVEPYAPI): $(DEPDIR) $(RAVEOBJS)
 	$(LDSHARED) -o $@ $(RAVEOBJS)
 
+ifeq ($(COMPILE_FOR_PYTHON), yes)
 .PHONY=install
 install:
 	@"$(HLHDF_INSTALL_BIN)" -f -o -C $(LIBRAVEPYAPI) "${DESTDIR}$(prefix)/lib/$(LIBRAVEPYAPI)"
@@ -49,6 +56,11 @@ install:
 	do \
 		"$(HLHDF_INSTALL_BIN)" -f -o -m644 -C $$i "${DESTDIR}$(prefix)/include/$$i"; \
 	done
+else
+.PHONY=install
+install:
+	:
+endif
 
 .PHONY=clean
 clean:

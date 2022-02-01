@@ -23,37 +23,60 @@
  FIXME: should proj/invproj raise exceptions on HUGE_VAL?
  -----------------------------------------------------------------------------*/
 
-#include "Python.h"
-#include "projects.h"
+#include "pyravecompat.h"
 
+#ifdef USE_PROJ4_API
+#include <projects.h>
 #ifdef PJ_VERSION
 #define UV projUV
+#endif
+#else
+#include <proj.h>
+#define UV PJ_UV
 #endif
 
 typedef struct {
   PyObject_HEAD
   PJ* pj;
+#ifndef USE_PROJ4_API
+  PJ_CONTEXT* context;
+#endif
 } ProjObject;
 
-staticforward PyTypeObject Proj_Type;
+static PyTypeObject Proj_Type;
 
 static PyObject *PyProj_Error;
 
 /* -------------------------------------------------------------------- */
 /* Constructors                                                         */
 
-static void _proj_error(void)
+static void _proj_error(ProjObject* po)
 {
+#ifdef USE_PROJ4_API
   PyErr_SetString(PyProj_Error, pj_strerrno(pj_errno));
+#else
+  int e;
+  if (po != NULL && po->context != NULL) {
+    e = proj_context_errno(po->context);
+  } else {
+    e = proj_errno(0);
+  }
+  PyErr_SetString(PyProj_Error, proj_errno_string(e));
+#endif
 }
 
 static PyObject*
 _proj_new(PyObject* self, PyObject* args)
 {
-  ProjObject* op;
-  PyObject* in;
+  ProjObject* op = NULL;
+  PyObject* in = NULL;
   int n, i;
+#ifdef USE_PROJ4_API
   char** argv;
+#else
+  char pcsdef[1025];
+  memset(pcsdef, 0, sizeof(pcsdef));
+#endif
 
   if (!PyArg_ParseTuple(args, "O", &in))
     return NULL;
@@ -62,30 +85,52 @@ _proj_new(PyObject* self, PyObject* args)
     PyErr_SetString(PyExc_TypeError, "argument must be sequence");
     return NULL;
   }
-
   op = PyObject_NEW(ProjObject, &Proj_Type);
   if (op == NULL)
     return NULL;
+  ((ProjObject*)op)->pj = NULL;
+#ifndef USE_PROJ4_API
+  ((ProjObject*)op)->context = NULL;
+#endif
 
   n = PyObject_Length(in);
 
   /* fetch argument array */
+#ifdef USE_PROJ4_API
   argv = malloc(n * sizeof(char*));
-  for (i = 0; i < n; i++) {
-    PyObject* op = PySequence_GetItem(in, i);
-    PyObject* str = PyObject_Str(op);
-    argv[i] = PyString_AsString(str);
-    Py_DECREF(str);
+  if (argv == NULL) {
+    PyErr_SetString(PyExc_MemoryError, "Could not allocate memory for arguments");
     Py_DECREF(op);
+    return NULL;
+  }
+#endif
+  for (i = 0; i < n; i++) {
+    PyObject* pso = PySequence_GetItem(in, i);
+    PyObject* str = PyObject_Str(pso);
+#ifdef USE_PROJ4_API
+    argv[i] = PyString_AsString(str);
+#else
+    strcat(pcsdef, PyString_AsString(str));
+    strcat(pcsdef, " ");
+#endif
+    Py_DECREF(str);
+    Py_DECREF(pso);
   }
 
+#ifdef USE_PROJ4_API
   op->pj = pj_init(n, argv);
-
   free(argv);
+#else
+  op->context = proj_context_create();
+  if (op->context != NULL) {
+    proj_log_level(op->context, PJ_LOG_NONE);
+    op->pj = proj_create(op->context, pcsdef);
+  }
+#endif
 
   if (!op->pj) {
     PyObject_Free(op);
-    _proj_error();
+    _proj_error(op);
     return NULL;
   }
 
@@ -94,8 +139,19 @@ _proj_new(PyObject* self, PyObject* args)
 
 static void _proj_dealloc(ProjObject* op)
 {
-  if (op->pj)
+#ifdef USE_PROJ4_API
+  if (op->pj) {
     pj_free(op->pj);
+  }
+#else
+  if (op->pj != NULL) {
+    proj_destroy(op->pj);
+  }
+  if (op->context != NULL) {
+    proj_context_destroy(op->context);
+  }
+#endif
+
   PyObject_Free(op);
 }
 
@@ -110,12 +166,20 @@ _proj_proj(ProjObject* self, PyObject* args)
   int i, n;
   UV uv;
 
+#ifndef USE_PROJ4_API
+  PJ_COORD c, outc;
+#endif
+
   if (PyArg_ParseTuple(args, "(dd)", &uv.u, &uv.v)) {
-
     /* tuple */
+#ifdef USE_PROJ4_API
     uv = pj_fwd(uv, self->pj);
+#else
+    c.uv = uv;
+    outc = proj_trans(self->pj, PJ_FWD, c);
+    uv = outc.uv;
+#endif
     return Py_BuildValue("dd", uv.u, uv.v);
-
   }
 
   PyErr_Clear();
@@ -143,7 +207,13 @@ _proj_proj(ProjObject* self, PyObject* args)
     }
     Py_DECREF(op);
 
+#ifdef USE_PROJ4_API
     uv = pj_fwd(uv, self->pj);
+#else
+    c.uv = uv;
+    outc = proj_trans(self->pj, PJ_FWD, c);
+    uv = outc.uv;
+#endif
 
     /* store result */
     op = Py_BuildValue("dd", uv.u, uv.v);
@@ -166,11 +236,18 @@ _proj_invproj(ProjObject* self, PyObject* args)
   PyObject* out;
   int i, n;
   UV uv;
+#ifndef USE_PROJ4_API
+  PJ_COORD c, outc;
+#endif
 
   if (PyArg_ParseTuple(args, "(dd)", &uv.u, &uv.v)) {
-
-    /* tuple */
+#ifdef USE_PROJ4_API
     uv = pj_inv(uv, self->pj);
+#else
+    c.uv = uv;
+    outc = proj_trans(self->pj, PJ_INV, c);
+    uv = outc.uv;
+#endif
     return Py_BuildValue("dd", uv.u, uv.v);
 
   }
@@ -200,7 +277,13 @@ _proj_invproj(ProjObject* self, PyObject* args)
     }
     Py_DECREF(op);
 
+#ifdef USE_PROJ4_API
     uv = pj_inv(uv, self->pj);
+#else
+    c.uv = uv;
+    outc = proj_trans(self->pj, PJ_INV, c);
+    uv = outc.uv;
+#endif
 
     /* store result */
     op = Py_BuildValue("dd", uv.u, uv.v);
@@ -224,38 +307,53 @@ static struct PyMethodDef _proj_methods[] =
 { NULL, NULL } /* sentinel */
 };
 
-static PyObject*
-_proj_getattr(ProjObject* s, char *name)
+static PyObject* _proj_getattro(ProjObject* s, PyObject* name)
 {
-  PyObject* res;
-
-  res = Py_FindMethod(_proj_methods, (PyObject*) s, name);
-  if (res)
-    return res;
-
-  PyErr_Clear();
-
-  /* no attributes */
-
-  PyErr_SetString(PyExc_AttributeError, name);
-  return NULL;
+  return PyObject_GenericGetAttr((PyObject*)s, name);
 }
 
-statichere PyTypeObject Proj_Type
-= {
-  PyObject_HEAD_INIT(0)
-  0, /*ob_size*/
+static PyTypeObject Proj_Type = {
+  PyVarObject_HEAD_INIT(NULL, 0) /*ob_size*/
   "Proj", /*tp_name*/
   sizeof(ProjObject), /*tp_size*/
   0, /*tp_itemsize*/
   /* methods */
   (destructor)_proj_dealloc, /*tp_dealloc*/
   0, /*tp_print*/
-  (getattrfunc)_proj_getattr, /*tp_getattr*/
+  (getattrfunc)0 /*_proj_getattr*/, /*tp_getattr*/
   0, /*tp_setattr*/
   0, /*tp_compare*/
   0, /*tp_repr*/
+  0,                            /*tp_as_number */
+  0,
+  0,                            /*tp_as_mapping */
   0, /*tp_hash*/
+  (ternaryfunc)0,               /*tp_call*/
+  (reprfunc)0,                  /*tp_str*/
+  (getattrofunc)_proj_getattro, /*tp_getattro*/
+  (setattrofunc)0,              /*tp_setattro*/
+  0,                            /*tp_as_buffer*/
+  Py_TPFLAGS_DEFAULT, /*tp_flags*/
+  0,                            /*tp_doc*/
+  (traverseproc)0,              /*tp_traverse*/
+  (inquiry)0,                   /*tp_clear*/
+  0,                            /*tp_richcompare*/
+  0,                            /*tp_weaklistoffset*/
+  0,                            /*tp_iter*/
+  0,                            /*tp_iternext*/
+  _proj_methods,                /*tp_methods*/
+  0,                            /*tp_members*/
+  0,                            /*tp_getset*/
+  0,                            /*tp_base*/
+  0,                            /*tp_dict*/
+  0,                            /*tp_descr_get*/
+  0,                            /*tp_descr_set*/
+  0,                            /*tp_dictoffset*/
+  0,                            /*tp_init*/
+  0,                            /*tp_alloc*/
+  0,                            /*tp_new*/
+  0,                            /*tp_free*/
+  0,                            /*tp_is_gc*/
 };
 
 /* -------------------------------------------------------------------- */
@@ -268,7 +366,11 @@ _proj_dmstor(PyObject* self, PyObject* args)
   if (!PyArg_ParseTuple(args, "s", &s))
     return NULL;
 
+#ifdef USE_PROJ4_API
   return Py_BuildValue("d", dmstor(s, NULL));
+#else
+  return Py_BuildValue("d", proj_dmstor(s, NULL));
+#endif
 }
 
 /* -------------------------------------------------------------------- */
@@ -282,19 +384,24 @@ static PyMethodDef functions[] =
 
 };
 
-PyMODINIT_FUNC init_proj(void)
+MOD_INIT(_proj)
 {
-  PyObject* m;
+  PyObject* module = NULL;
 
-  /* Patch object type */
-  Proj_Type.ob_type = &PyType_Type;
+  MOD_INIT_SETUP_TYPE(Proj_Type, &PyType_Type);
 
   /* Initialize module object */
-  m = Py_InitModule("_proj", functions);
+  MOD_INIT_DEF(module, "_proj", NULL/*doc*/, functions);
+  if (module == NULL) {
+    return MOD_INIT_ERROR;
+  }
 
   /* Create error object */
-  PyProj_Error = PyString_FromString("proj.error");
-  if (PyProj_Error == NULL || PyDict_SetItemString(PyModule_GetDict(m),
-                                                   "error", PyProj_Error) != 0)
-    Py_FatalError("can't define proj.error");
+  PyProj_Error = PyErr_NewException("proj.error", NULL, NULL);
+  if (PyProj_Error == NULL || PyDict_SetItemString(PyModule_GetDict(module), "error", PyProj_Error) != 0) {
+    Py_FatalError("Can't define _proj.error");
+    return MOD_INIT_ERROR;
+  }
+
+  return MOD_INIT_SUCCESS(module);
 }

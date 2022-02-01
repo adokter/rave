@@ -643,6 +643,8 @@ EXPAT_INCLUDE_DIR
 NUMPY_INCLUDE_DIR
 PROJ_LIB_DIR
 PROJ_INCLUDE_DIR
+USE_PROJ4_API
+COMPILE_FOR_PYTHON
 GOT_ITRUNC
 PYDEFS
 PYCCSHARED
@@ -651,11 +653,14 @@ PYLDFLAGS
 PYOPT
 RAVE_PATCH_LEVEL
 RAVE_VERSION
+PY_PYTHON_BIN
 PY_SITEPACK
 PY_INCLUDES
 PYCC
+PROJ_VERSION
 EGREP
 GREP
+MACHDEP
 AR
 CPP
 OBJEXT
@@ -708,7 +713,14 @@ SHELL'
 ac_subst_files=''
 ac_user_opts='
 enable_option_checking
+with_python
+enable_py3support
+with_py3bin
+with_py3bin_config
+with_python_makefile
 with_proj
+with_legacy_proj
+with_new_proj
 with_expat
 with_numpy
 with_hlhdf
@@ -726,7 +738,8 @@ CFLAGS
 LDFLAGS
 LIBS
 CPPFLAGS
-CPP'
+CPP
+MACHDEP'
 
 
 # Initialize some variables set by options.
@@ -1347,12 +1360,19 @@ Optional Features:
   --disable-option-checking  ignore unrecognized --enable/--with options
   --disable-FEATURE       do not include FEATURE (same as --enable-FEATURE=no)
   --enable-FEATURE[=ARG]  include FEATURE [ARG=yes]
+  --enable-py3support     Builds rave with support for python3.
   --enable-debug-memory     Turns on the rave memory debugging. This should usually not be activated.
 
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
   --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
-  --with-proj=ROOT or INC,LIB       Use the proj library
+  --with-python=(yes|no)     Compile for python
+  --with-py3bin=python3  What python 3 binary to use
+  --with-py3bin-config=python3-config  What python 3 config binary to use
+  --with-python-makefile=Makefile  Where the makefile used for building python can be found
+  --with-proj=ROOT or INC,LIB       Use proj and try to identify version automatically. First tries proj >= 6 and then proj.4 or 5
+  --with-legacy-proj=ROOT or INC,LIB       Use the legacy proj library (default disabled)
+  --with-new-proj=ROOT or INC,LIB       Use the new proj library (default disabled)
   --with-expat=ROOT or INC,LIB       Use the expat library
   --with-numpy=INC     Use the numpy include file
   --with-hlhdf=ROOT    Use the hlhdf library
@@ -1370,6 +1390,7 @@ Some influential environment variables:
   CPPFLAGS    (Objective) C/C++ preprocessor flags, e.g. -I<include dir> if
               you have headers in a nonstandard directory <include dir>
   CPP         C preprocessor
+  MACHDEP     name for machine-dependent library files
 
 Use these variables to override the choices made by `configure' or to help
 it to find libraries and programs with nonstandard names/locations.
@@ -2093,46 +2114,159 @@ fi
 
 LIBS=-lm
 
-#
-# Extract what compiler the python binary was compiled with
-#
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for the compiler used for generating python\"" >&5
+
+
+# Check whether --with-python was given.
+if test "${with_python+set}" = set; then :
+  withval=$with_python;
+else
+  withval=yes
+fi
+
+COMPILE_FOR_PYTHON=yes
+case $withval in
+  no)
+       COMPILE_FOR_PYTHON=no
+       ;;
+  *)
+       ;;
+esac
+
+
+PYBIN=python
+py3support=yes
+# Check whether --enable-py3support was given.
+if test "${enable_py3support+set}" = set; then :
+  enableval=$enable_py3support; py3support=$enableval
+fi
+
+
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+  if [ "x$py3support" = "xyes" ]; then
+    PYOPT="$PYOPT -DPY3_SUPPORT"
+    PYBIN=python3
+  fi
+fi
+
+
+# Check whether --with-py3bin was given.
+if test "${with_py3bin+set}" = set; then :
+  withval=$with_py3bin;
+else
+  withval=python3
+fi
+
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+  if [ "$PYBIN" = "python3" ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking what python3 binary to use" >&5
+$as_echo_n "checking what python3 binary to use... " >&6; }
+    if [ "$withval" != "python3" ]; then
+      PYBIN=$withval
+    fi
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: $PYBIN" >&5
+$as_echo "$PYBIN" >&6; }
+  fi
+fi
+
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+PYVERSION=`$PYBIN -c "import sys; print(sys.version[:3])"`
+PY_EXEC_INSTALLDIR=`$PYBIN -c "import sys; print(sys.exec_prefix)"`
+fi
+
+PY_PYTHON_BIN="$PYBIN"
+
+PYCONFIG_BIN="python-config"
+
+# Check whether --with-py3bin-config was given.
+if test "${with_py3bin_config+set}" = set; then :
+  withval=$with_py3bin_config;
+else
+  withval=default
+fi
+
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+  if [ "$py3support" = "yes" ]; then
+    if [ "$withval" = "default" ]; then
+      PYCONFIG_BIN="$PYBIN-config"
+    else
+      PYCONFIG_BIN="$withval"
+    fi
+  fi
+fi
+
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for python Makefile" >&5
+$as_echo_n "checking for python Makefile... " >&6; }
+fi
+
+PY_CONFIG_MAKE=
+
+
+# Check whether --with-python-makefile was given.
+if test "${with_python_makefile+set}" = set; then :
+  withval=$with_python_makefile;
+else
+  withval=no
+fi
+
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+
+  if [ "$withval" != "no" ]; then
+    if [ -f $withval ]; then
+      PY_CONFIG_MAKE="$withval"
+    fi
+  fi
+
+
+  PY_CONFIGDIR=`$PYCONFIG_BIN --configdir`
+  if test $? -eq 0; then
+    if [ "x$PY_CONFIG_MAKE" = "x" ]; then
+      if [ -f "$PY_CONFIGDIR/Makefile" ]; then
+        PY_CONFIG_MAKE="$PY_CONFIGDIR/Makefile"
+      fi
+    fi
+  fi
+
+  if [ "x$PY_CONFIG_MAKE" = "x" ]; then
+    PY_CONFIG_MAKE="$PY_EXEC_INSTALLDIR/lib/python$PYVERSION/config/Makefile"
+    if [ ! -f "$PY_CONFIG_MAKE" ]; then
+      PY_CONFIG_MAKE="$PY_EXEC_INSTALLDIR/lib64/python$PYVERSION/config/Makefile"
+    fi
+  fi
+
+  if [ ! -f "$PY_CONFIG_MAKE" ]; then
+    as_fn_error $? "Could not successfully find the python Makefile" "$LINENO" 5
+  fi
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $PY_CONFIG_MAKE" >&5
+$as_echo "$PY_CONFIG_MAKE" >&6; }
+
+
+  #
+  # Extract what compiler the python binary was compiled with
+  #
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for the compiler used for generating python\"" >&5
 $as_echo_n "checking \"for the compiler used for generating python\"... " >&6; }
 
-PYCC=
+  PYCC=
 
-PYVERSION=`python -c "import sys; print sys.version[:3]"`
-PY_EXEC_INSTALLDIR=`python -c "import sys; print sys.exec_prefix"`
-
-PY_CONFIGDIR=`python-config --configdir`
-if test $? -ne 0; then
-  PY_CONFIG_MAKE="$PY_EXEC_INSTALLDIR/lib/python$PYVERSION/config/Makefile"
-  if [ ! -f "$PY_CONFIG_MAKE" ]; then
-    PY_CONFIG_MAKE="$PY_EXEC_INSTALLDIR/lib64/python$PYVERSION/config/Makefile"
-  fi
-else
-  PY_CONFIG_MAKE="$PY_CONFIGDIR/Makefile"
-fi
-
-if [ ! -f "$PY_CONFIG_MAKE" ]; then
-  as_fn_error $? "Could not successfully find the python Makefile" "$LINENO" 5
-fi
-
-PYCC=`cat $PY_CONFIG_MAKE | sed -n "/^CC=/p" | sed -e "s/CC=//g" | awk '{print $1}'`
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYCC\"" >&5
+  PYCC=`cat $PY_CONFIG_MAKE | sed -n "/^CC=/p" | sed -e "s/CC=//g" | awk '{print $1}'`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYCC\"" >&5
 $as_echo "\"$PYCC\"" >&6; }
-CC=$PYCC
+  #CC=$PYCC
 
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking if python CC defines pthread usage" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking if python CC defines pthread usage" >&5
 $as_echo_n "checking if python CC defines pthread usage... " >&6; }
-PYPTHREADCC=`cat $PY_CONFIG_MAKE | sed -n "/^CC=/p" | sed -e "s/CC=//g" | grep "pthread"`
-PYGOTPTHREAD=no
-if [ "$PYPTHREADCC" != "" ]; then
-  PYGOTPTHREAD=yes
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $PYGOTPTHREAD" >&5
+  PYPTHREADCC=`cat $PY_CONFIG_MAKE | sed -n "/^CC=/p" | sed -e "s/CC=//g" | grep "pthread"`
+  PYGOTPTHREAD=no
+  if [ "$PYPTHREADCC" != "" ]; then
+    PYGOTPTHREAD=yes
+  fi
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $PYGOTPTHREAD" >&5
 $as_echo "$PYGOTPTHREAD" >&6; }
+
+fi #if COMPILE_FOR_PYTHON
+
 
 if test -n "$ac_tool_prefix"; then
   # Extract the first word of "${ac_tool_prefix}ranlib", so it can be a program name with args.
@@ -2232,197 +2366,7 @@ ac_compile='$CC -c $CFLAGS $CPPFLAGS conftest.$ac_ext >&5'
 ac_link='$CC -o conftest$ac_exeext $CFLAGS $CPPFLAGS $LDFLAGS conftest.$ac_ext $LIBS >&5'
 ac_compiler_gnu=$ac_cv_c_compiler_gnu
 if test -n "$ac_tool_prefix"; then
-  # Extract the first word of "${ac_tool_prefix}gcc", so it can be a program name with args.
-set dummy ${ac_tool_prefix}gcc; ac_word=$2
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
-$as_echo_n "checking for $ac_word... " >&6; }
-if ${ac_cv_prog_CC+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  if test -n "$CC"; then
-  ac_cv_prog_CC="$CC" # Let the user override the test.
-else
-as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  test -z "$as_dir" && as_dir=.
-    for ac_exec_ext in '' $ac_executable_extensions; do
-  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
-    ac_cv_prog_CC="${ac_tool_prefix}gcc"
-    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-  done
-IFS=$as_save_IFS
-
-fi
-fi
-CC=$ac_cv_prog_CC
-if test -n "$CC"; then
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CC" >&5
-$as_echo "$CC" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-fi
-
-
-fi
-if test -z "$ac_cv_prog_CC"; then
-  ac_ct_CC=$CC
-  # Extract the first word of "gcc", so it can be a program name with args.
-set dummy gcc; ac_word=$2
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
-$as_echo_n "checking for $ac_word... " >&6; }
-if ${ac_cv_prog_ac_ct_CC+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  if test -n "$ac_ct_CC"; then
-  ac_cv_prog_ac_ct_CC="$ac_ct_CC" # Let the user override the test.
-else
-as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  test -z "$as_dir" && as_dir=.
-    for ac_exec_ext in '' $ac_executable_extensions; do
-  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
-    ac_cv_prog_ac_ct_CC="gcc"
-    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-  done
-IFS=$as_save_IFS
-
-fi
-fi
-ac_ct_CC=$ac_cv_prog_ac_ct_CC
-if test -n "$ac_ct_CC"; then
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_ct_CC" >&5
-$as_echo "$ac_ct_CC" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-fi
-
-  if test "x$ac_ct_CC" = x; then
-    CC=""
-  else
-    case $cross_compiling:$ac_tool_warned in
-yes:)
-{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: using cross tools not prefixed with host triplet" >&5
-$as_echo "$as_me: WARNING: using cross tools not prefixed with host triplet" >&2;}
-ac_tool_warned=yes ;;
-esac
-    CC=$ac_ct_CC
-  fi
-else
-  CC="$ac_cv_prog_CC"
-fi
-
-if test -z "$CC"; then
-          if test -n "$ac_tool_prefix"; then
-    # Extract the first word of "${ac_tool_prefix}cc", so it can be a program name with args.
-set dummy ${ac_tool_prefix}cc; ac_word=$2
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
-$as_echo_n "checking for $ac_word... " >&6; }
-if ${ac_cv_prog_CC+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  if test -n "$CC"; then
-  ac_cv_prog_CC="$CC" # Let the user override the test.
-else
-as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  test -z "$as_dir" && as_dir=.
-    for ac_exec_ext in '' $ac_executable_extensions; do
-  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
-    ac_cv_prog_CC="${ac_tool_prefix}cc"
-    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-  done
-IFS=$as_save_IFS
-
-fi
-fi
-CC=$ac_cv_prog_CC
-if test -n "$CC"; then
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CC" >&5
-$as_echo "$CC" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-fi
-
-
-  fi
-fi
-if test -z "$CC"; then
-  # Extract the first word of "cc", so it can be a program name with args.
-set dummy cc; ac_word=$2
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
-$as_echo_n "checking for $ac_word... " >&6; }
-if ${ac_cv_prog_CC+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  if test -n "$CC"; then
-  ac_cv_prog_CC="$CC" # Let the user override the test.
-else
-  ac_prog_rejected=no
-as_save_IFS=$IFS; IFS=$PATH_SEPARATOR
-for as_dir in $PATH
-do
-  IFS=$as_save_IFS
-  test -z "$as_dir" && as_dir=.
-    for ac_exec_ext in '' $ac_executable_extensions; do
-  if as_fn_executable_p "$as_dir/$ac_word$ac_exec_ext"; then
-    if test "$as_dir/$ac_word$ac_exec_ext" = "/usr/ucb/cc"; then
-       ac_prog_rejected=yes
-       continue
-     fi
-    ac_cv_prog_CC="cc"
-    $as_echo "$as_me:${as_lineno-$LINENO}: found $as_dir/$ac_word$ac_exec_ext" >&5
-    break 2
-  fi
-done
-  done
-IFS=$as_save_IFS
-
-if test $ac_prog_rejected = yes; then
-  # We found a bogon in the path, so make sure we never use it.
-  set dummy $ac_cv_prog_CC
-  shift
-  if test $# != 0; then
-    # We chose a different compiler from the bogus one.
-    # However, it has the same basename, so the bogon will be chosen
-    # first if we set CC to just the basename; use the full file name.
-    shift
-    ac_cv_prog_CC="$as_dir/$ac_word${1+' '}$@"
-  fi
-fi
-fi
-fi
-CC=$ac_cv_prog_CC
-if test -n "$CC"; then
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CC" >&5
-$as_echo "$CC" >&6; }
-else
-  { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
-$as_echo "no" >&6; }
-fi
-
-
-fi
-if test -z "$CC"; then
-  if test -n "$ac_tool_prefix"; then
-  for ac_prog in cl.exe
+  for ac_prog in $PYCC gcc cc
   do
     # Extract the first word of "$ac_tool_prefix$ac_prog", so it can be a program name with args.
 set dummy $ac_tool_prefix$ac_prog; ac_word=$2
@@ -2466,7 +2410,7 @@ fi
 fi
 if test -z "$CC"; then
   ac_ct_CC=$CC
-  for ac_prog in cl.exe
+  for ac_prog in $PYCC gcc cc
 do
   # Extract the first word of "$ac_prog", so it can be a program name with args.
 set dummy $ac_prog; ac_word=$2
@@ -2519,8 +2463,6 @@ ac_tool_warned=yes ;;
 esac
     CC=$ac_ct_CC
   fi
-fi
-
 fi
 
 
@@ -3197,6 +3139,8 @@ done
 test -n "$AR" || AR="ar"
 
 
+PYCC=$CC
+
 PY_INCLUDES=
 PY_SITEPACK=
 PYOPT=
@@ -3205,64 +3149,466 @@ PYLDSHARED=
 PYCCSHARED=
 PYDEFS=
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for python includes\"" >&5
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for python includes\"" >&5
 $as_echo_n "checking \"for python includes\"... " >&6; }
-PY_INCLUDES="$PY_EXEC_INSTALLDIR/include/python$PYVERSION"
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PY_INCLUDES\"" >&5
+  PY_INCLUDES="$PY_EXEC_INSTALLDIR/include/python$PYVERSION"
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PY_INCLUDES\"" >&5
 $as_echo "\"$PY_INCLUDES\"" >&6; }
-PY_INCLUDES="-I$PY_INCLUDES"
+  PY_INCLUDES="-I$PY_INCLUDES"
+  PY_INCLUDES=`$PYCONFIG_BIN --includes`
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for python lib site-packages\"" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for python lib site-packages\"" >&5
 $as_echo_n "checking \"for python lib site-packages\"... " >&6; }
-PY_SITEPACK="$PY_EXEC_INSTALLDIR/lib/python$PYVERSION/site-packages"
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PY_SITEPACK\"" >&5
+  TMP_SITEPACK=`$PYBIN -c "from distutils.sysconfig import get_python_lib; print(get_python_lib(1))"`
+  if [ "$TMP_SITEPACK" != "" ]; then
+    PY_SITEPACK="$TMP_SITEPACK"
+  else
+    PY_SITEPACK="$PY_EXEC_INSTALLDIR/lib/python$PYVERSION/site-packages"
+  fi
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PY_SITEPACK\"" >&5
 $as_echo "\"$PY_SITEPACK\"" >&6; }
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for python options\"" >&5
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for python options\"" >&5
 $as_echo_n "checking \"for python options\"... " >&6; }
-PYOPT=`cat $PY_CONFIG_MAKE | sed -n "/^OPT=/p" | sed -n -e"s/^OPT=[ 	]*\(.*\)/\1/p"`
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYOPT\"" >&5
+  PYOPT=`cat $PY_CONFIG_MAKE | sed -n "/^OPT=/p" | sed -n -e"s/^OPT=[ 	]*\(.*\)/\1/p"`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYOPT\"" >&5
 $as_echo "\"$PYOPT\"" >&6; }
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for ldflags\"" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for ldflags\"" >&5
 $as_echo_n "checking \"for ldflags\"... " >&6; }
-PYLDFLAGS=`cat $PY_CONFIG_MAKE | sed -n "/^LDFLAGS=/p" | sed -n -e"s/^LDFLAGS=[ 	]*\(.*\)/\1/p"`
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYLDFLAGS\"" >&5
+  PYLDFLAGS=`cat $PY_CONFIG_MAKE | sed -n "/^LDFLAGS=/p" | sed -n -e"s/^LDFLAGS=[ 	]*\(.*\)/\1/p"`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYLDFLAGS\"" >&5
 $as_echo "\"$PYLDFLAGS\"" >&6; }
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for ldshared\"" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for ldshared\"" >&5
 $as_echo_n "checking \"for ldshared\"... " >&6; }
-PYLDSHARED=`cat $PY_CONFIG_MAKE | sed -n "/^LDSHARED=/p" | sed -n -e"s/^LDSHARED=[ 	]*\(.*\)/\1/p"`
+  PYLDSHARED=`cat $PY_CONFIG_MAKE | sed -n "/^LDSHARED=/p" | sed -n -e"s/^LDSHARED=[ 	]*\(.*\)/\1/p"`
 
-# Special hack for mac osx.
-ISMACOS=no
-case `uname -s` in
- Darwin*)
-   ISMACOS=yes
-   ;;
- darwin*)
-   ISMACOS=yes
-   ;;
-esac
+  # Special hack for mac osx.
+  ISMACOS=no
+  case `uname -s` in
+    Darwin*)
+      ISMACOS=yes
+      ;;
+    darwin*)
+      ISMACOS=yes
+      ;;
+  esac
 
-if [ "x$ISMACOS" = "xyes" ]; then
-  PYLDSHARED=`echo $PYLDSHARED | sed -e "s/[ \t]-bundle[ \t]/ -dynamiclib /g"`
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYLDSHARED\"" >&5
+  if [ "x$ISMACOS" = "xyes" ]; then
+    PYLDSHARED=`echo $PYLDSHARED | sed -e "s/[ \t]-bundle[ \t]/ -dynamiclib /g"`
+  fi
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYLDSHARED\"" >&5
 $as_echo "\"$PYLDSHARED\"" >&6; }
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for ccshared\"" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for ccshared\"" >&5
 $as_echo_n "checking \"for ccshared\"... " >&6; }
-PYCCSHARED=`cat $PY_CONFIG_MAKE | sed -n "/^CCSHARED=/p" | sed -n -e"s/^CCSHARED=[ 	]*\(.*\)/\1/p"`
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYCCSHARED\"" >&5
+  PYCCSHARED=`cat $PY_CONFIG_MAKE | sed -n "/^CCSHARED=/p" | sed -n -e"s/^CCSHARED=[ 	]*\(.*\)/\1/p"`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYCCSHARED\"" >&5
 $as_echo "\"$PYCCSHARED\"" >&6; }
 
-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for defs\"" >&5
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking \"for defs\"" >&5
 $as_echo_n "checking \"for defs\"... " >&6; }
-PYDEFS=`cat $PY_CONFIG_MAKE | sed -n "/^DEFS=/p" | sed -n -e"s/^DEFS=[ 	]*\(.*\)/\1/p"`
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYDEFS\"" >&5
+  PYDEFS=`cat $PY_CONFIG_MAKE | sed -n "/^DEFS=/p" | sed -n -e"s/^DEFS=[ 	]*\(.*\)/\1/p"`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$PYDEFS\"" >&5
 $as_echo "\"$PYDEFS\"" >&6; }
 
+else #if COMPILE_FOR_PYTHON
+  # If we are building without python support, then we still want to use a similar way to identify compiler flags as when running Python.
+  # This part has been taken from python config-file since we still want the same behaviour regardless if we are building for python or not.
+  #
+  # However, this is not complete, just the basic stuff to get optimization flags in place.
+
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking MACHDEP" >&5
+$as_echo_n "checking MACHDEP... " >&6; }
+  if test -z "$MACHDEP"; then
+    # avoid using uname for cross builds
+    if test "$cross_compiling" = yes; then
+       # ac_sys_system and ac_sys_release are used for setting
+       # a lot of different things including 'define_xopen_source'
+       # in the case statement below.
+	case "$host" in
+	*-*-linux-android*)
+		ac_sys_system=Linux-android
+		;;
+	*-*-linux*)
+		ac_sys_system=Linux
+		;;
+	*-*-cygwin*)
+		ac_sys_system=Cygwin
+		;;
+	*)
+		# for now, limit cross builds to known configurations
+		MACHDEP="unknown"
+		as_fn_error $? "cross build not supported for $host" "$LINENO" 5
+	esac
+	ac_sys_release=
+    else
+	ac_sys_system=`uname -s`
+	if test "$ac_sys_system" = "AIX" \
+	-o "$ac_sys_system" = "UnixWare" -o "$ac_sys_system" = "OpenUNIX"; then
+		ac_sys_release=`uname -v`
+	else
+		ac_sys_release=`uname -r`
+	fi
+    fi
+    ac_md_system=`echo $ac_sys_system |
+			tr -d '/ ' | tr '[A-Z]' '[a-z]'`
+    ac_md_release=`echo $ac_sys_release |
+			tr -d '/ ' | sed 's/^[A-Z]\.//' | sed 's/\..*//'`
+    MACHDEP="$ac_md_system$ac_md_release"
+
+    case $MACHDEP in
+	linux*) MACHDEP="linux";;
+	cygwin*) MACHDEP="cygwin";;
+	darwin*) MACHDEP="darwin";;
+	irix646) MACHDEP="irix6";;
+	'')	MACHDEP="unknown";;
+    esac
+  fi
+
+  case $ac_sys_system in
+    # is there any other compiler on Darwin besides gcc?
+    Darwin*)
+        # -Wno-long-double, -no-cpp-precomp, and -mno-fused-madd
+        # used to be here, but non-Apple gcc doesn't accept them.
+        if test "${CC}" = gcc; then
+            { $as_echo "$as_me:${as_lineno-$LINENO}: checking which compiler should be used" >&5
+$as_echo_n "checking which compiler should be used... " >&6; }
+            case "${UNIVERSALSDK}" in
+            */MacOSX10.4u.sdk)
+                # Build using 10.4 SDK, force usage of gcc when the
+                # compiler is gcc, otherwise the user will get very
+                # confusing error messages when building on OSX 10.6
+                CC=gcc-4.0
+                CPP=cpp-4.0
+                ;;
+            esac
+            { $as_echo "$as_me:${as_lineno-$LINENO}: result: $CC" >&5
+$as_echo "$CC" >&6; }
+        fi
+
+        { $as_echo "$as_me:${as_lineno-$LINENO}: checking which MACOSX_DEPLOYMENT_TARGET to use" >&5
+$as_echo_n "checking which MACOSX_DEPLOYMENT_TARGET to use... " >&6; }
+        cur_target_major=`sw_vers -productVersion | \
+                sed 's/\([0-9]*\)\.\([0-9]*\).*/\1/'`
+        cur_target_minor=`sw_vers -productVersion | \
+                sed 's/\([0-9]*\)\.\([0-9]*\).*/\2/'`
+        cur_target="${cur_target_major}.${cur_target_minor}"
+        if test ${cur_target_major} -eq 10 && \
+           test ${cur_target_minor} -ge 3 && \
+           test ${cur_target_minor} -le 5
+        then
+            # OS X 10.3 through 10.5
+            cur_target=10.3
+            if test ${enable_universalsdk}
+            then
+                case "$UNIVERSAL_ARCHS" in
+                all|3-way|intel|64-bit)
+                    # These configurations were first supported in 10.5
+                    cur_target='10.5'
+                    ;;
+                esac
+            else
+                if test `/usr/bin/arch` = "i386"
+                then
+                    # 10.4 was the first release to support Intel archs
+                    cur_target="10.4"
+                fi
+            fi
+        fi
+        CONFIGURE_MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET-${cur_target}}
+        # Make sure that MACOSX_DEPLOYMENT_TARGET is set in the
+        # environment with a value that is the same as what we'll use
+        # in the Makefile to ensure that we'll get the same compiler
+        # environment during configure and build time.
+        MACOSX_DEPLOYMENT_TARGET="$CONFIGURE_MACOSX_DEPLOYMENT_TARGET"
+        export MACOSX_DEPLOYMENT_TARGET
+        EXPORT_MACOSX_DEPLOYMENT_TARGET=''
+        { $as_echo "$as_me:${as_lineno-$LINENO}: result: $MACOSX_DEPLOYMENT_TARGET" >&5
+$as_echo "$MACOSX_DEPLOYMENT_TARGET" >&6; }
+
+        # end of Darwin* tests
+        ;;
+  esac
+
+  # SHLIB_SUFFIX is the extension of shared libraries `(including the dot!)
+  # -- usually .so, .sl on HP-UX, .dll on Cygwin
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking the extension of shared libraries" >&5
+$as_echo_n "checking the extension of shared libraries... " >&6; }
+  if test -z "$SHLIB_SUFFIX"; then
+	case $ac_sys_system in
+	hp*|HP*)
+		case `uname -m` in
+			ia64) SHLIB_SUFFIX=.so;;
+	  		*)    SHLIB_SUFFIX=.sl;;
+		esac
+		;;
+	CYGWIN*)   SHLIB_SUFFIX=.dll;;
+	*)	   SHLIB_SUFFIX=.so;;
+	esac
+  fi
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $SHLIB_SUFFIX" >&5
+$as_echo "$SHLIB_SUFFIX" >&6; }
+
+# LDSHARED is the ld *command* used to create shared library
+# -- "cc -G" on SunOS 5.x, "ld -shared" on IRIX 5
+# (Shared libraries in this instance are shared modules to be loaded into
+# Python, as opposed to building Python itself as a shared library.)
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking LDSHARED" >&5
+$as_echo_n "checking LDSHARED... " >&6; }
+  if test -z "$LDSHARED"
+    then
+	case $ac_sys_system/$ac_sys_release in
+	AIX*)
+		BLDSHARED="Modules/ld_so_aix \$(CC) -bI:Modules/python.exp"
+		LDSHARED="\$(LIBPL)/ld_so_aix \$(CC) -bI:\$(LIBPL)/python.exp"
+		;;
+	IRIX/5*) LDSHARED="ld -shared";;
+	IRIX*/6*) LDSHARED="ld ${SGI_ABI} -shared -all";;
+	SunOS/5*)
+		if test "$GCC" = "yes" ; then
+			LDSHARED='$(CC) -shared'
+			LDCXXSHARED='$(CXX) -shared'
+		else
+			LDSHARED='$(CC) -G'
+			LDCXXSHARED='$(CXX) -G'
+		fi ;;
+	hp*|HP*)
+		if test "$GCC" = "yes" ; then
+			LDSHARED='$(CC) -shared'
+			LDCXXSHARED='$(CXX) -shared'
+		else
+			LDSHARED='ld -b'
+		fi ;;
+	Darwin/1.3*)
+		LDSHARED='$(CC) -dynamiclib'
+		LDCXXSHARED='$(CXX) -dynamiclib'
+		LDSHARED="$LDSHARED -undefined suppress"
+		LDCXXSHARED="$LDCXXSHARED -undefined suppress"
+		;;
+	Darwin/1.4*|Darwin/5.*|Darwin/6.*)
+		LDSHARED='$(CC) -dynamiclib'
+		LDCXXSHARED='$(CXX) -dynamiclib'
+		BLDSHARED="$LDSHARED "'-bundle_loader $(BUILDPYTHON)'
+		LDSHARED="$LDSHARED "'-bundle_loader $(BINDIR)/python$(VERSION)$(EXE)'
+		LDCXXSHARED="$LDCXXSHARED "'-bundle_loader $(BINDIR)/python$(VERSION)$(EXE)'
+		;;
+	Darwin/*)
+		# Use -undefined dynamic_lookup whenever possible (10.3 and later).
+		dep_target_major=`echo ${MACOSX_DEPLOYMENT_TARGET} | \
+				sed 's/\([0-9]*\)\.\([0-9]*\).*/\1/'`
+		dep_target_minor=`echo ${MACOSX_DEPLOYMENT_TARGET} | \
+				sed 's/\([0-9]*\)\.\([0-9]*\).*/\2/'`
+		if test ${dep_target_major} -eq 10 && \
+		   test ${dep_target_minor} -le 2; then
+			# building for OS X 10.0 through 10.2
+			LDSHARED='$(CC) -dynamiclib'
+			LDCXXSHARED='$(CXX) -dynamiclib'
+			# No framework, use the Python app as bundle-loader
+			BLDSHARED="$LDSHARED "'-bundle_loader $(BUILDPYTHON)'
+			LDSHARED="$LDSHARED "'-bundle_loader $(BINDIR)/python$(VERSION)$(EXE)'
+			LDCXXSHARED="$LDCXXSHARED "'-bundle_loader $(BINDIR)/python$(VERSION)$(EXE)'
+		else
+			# building for OS X 10.3 and later
+			LDSHARED='$(CC) -dynamiclib -undefined dynamic_lookup'
+			LDCXXSHARED='$(CXX) -dynamiclib -undefined dynamic_lookup'
+			BLDSHARED="$LDSHARED"
+		fi
+		;;
+	Linux*|GNU*|QNX*)
+		LDSHARED='$(CC) -shared'
+		LDCXXSHARED='$(CXX) -shared';;
+	BSD/OS*/4*)
+		LDSHARED="gcc -shared"
+		LDCXXSHARED="g++ -shared";;
+	FreeBSD*)
+		if [ "`$CC -dM -E - </dev/null | grep __ELF__`" != "" ]
+		then
+			LDSHARED='$(CC) -shared'
+			LDCXXSHARED='$(CXX) -shared'
+		else
+			LDSHARED="ld -Bshareable"
+		fi;;
+	OpenBSD*)
+		if [ "`$CC -dM -E - </dev/null | grep __ELF__`" != "" ]
+		then
+				LDSHARED='$(CC) -shared $(CCSHARED)'
+				LDCXXSHARED='$(CXX) -shared $(CCSHARED)'
+		else
+				case `uname -r` in
+				[01].* | 2.[0-7] | 2.[0-7].*)
+				   LDSHARED="ld -Bshareable ${LDFLAGS}"
+				   ;;
+				*)
+				   LDSHARED='$(CC) -shared $(CCSHARED)'
+				   LDCXXSHARED='$(CXX) -shared $(CCSHARED)'
+				   ;;
+				esac
+		fi;;
+	NetBSD*|DragonFly*)
+		LDSHARED='$(CC) -shared'
+		LDCXXSHARED='$(CXX) -shared';;
+	OpenUNIX*|UnixWare*)
+		if test "$GCC" = "yes" ; then
+			LDSHARED='$(CC) -shared'
+			LDCXXSHARED='$(CXX) -shared'
+		else
+			LDSHARED='$(CC) -G'
+			LDCXXSHARED='$(CXX) -G'
+		fi;;
+	SCO_SV*)
+		LDSHARED='$(CC) -Wl,-G,-Bexport'
+		LDCXXSHARED='$(CXX) -Wl,-G,-Bexport';;
+	CYGWIN*)
+		LDSHARED="gcc -shared -Wl,--enable-auto-image-base"
+		LDCXXSHARED="g++ -shared -Wl,--enable-auto-image-base";;
+	*)	LDSHARED="ld";;
+	esac
+  fi
+  PYLDSHARED=$LDSHARED
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $PYLDSHARED" >&5
+$as_echo "$PYLDSHARED" >&6; }
+
+# CCSHARED are the C *flags* used to create objects to go into a shared
+# library (module) -- this is only needed for a few systems
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking CCSHARED" >&5
+$as_echo_n "checking CCSHARED... " >&6; }
+  if test -z "$CCSHARED"
+  then
+	case $ac_sys_system/$ac_sys_release in
+	SunOS*) if test "$GCC" = yes;
+		then CCSHARED="-fPIC";
+		elif test `uname -p` = sparc;
+		then CCSHARED="-xcode=pic32";
+		else CCSHARED="-Kpic";
+		fi;;
+	hp*|HP*) if test "$GCC" = yes;
+		 then CCSHARED="-fPIC";
+		 else CCSHARED="+z";
+		 fi;;
+	Linux-android*) ;;
+	Linux*|GNU*) CCSHARED="-fPIC";;
+	BSD/OS*/4*) CCSHARED="-fpic";;
+	FreeBSD*|NetBSD*|OpenBSD*|DragonFly*) CCSHARED="-fPIC";;
+	OpenUNIX*|UnixWare*)
+		if test "$GCC" = "yes"
+		then CCSHARED="-fPIC"
+		else CCSHARED="-KPIC"
+		fi;;
+	SCO_SV*)
+		if test "$GCC" = "yes"
+		then CCSHARED="-fPIC"
+		else CCSHARED="-Kpic -belf"
+		fi;;
+	IRIX*/6*)  case $CC in
+		   *gcc*) CCSHARED="-shared";;
+		   *) CCSHARED="";;
+		   esac;;
+	esac
+  fi
+  PYCCSHARED=$CCSHARED
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $PYCCSHARED" >&5
+$as_echo "$PYCCSHARED" >&6; }
+
+  # Availability of -O2:
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for -O2" >&5
+$as_echo_n "checking for -O2... " >&6; }
+  saved_cflags="$CFLAGS"
+  CFLAGS="-O2"
+
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+int
+main ()
+{
+
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  have_O2=yes
+else
+  have_O2=no
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+  { $as_echo "$as_me:${as_lineno-$LINENO}: result: $have_O2" >&5
+$as_echo "$have_O2" >&6; }
+  CFLAGS="$saved_cflags"
+
+  if test "${OPT-unset}" = "unset"; then
+    case $GCC in
+    yes)
+        if test "$CC" != 'g++' ; then
+	      STRICT_PROTO="-Wstrict-prototypes"
+	    fi
+
+        # For gcc 4.x we need to use -fwrapv so lets check if its supported
+        if "$CC" -v --help 2>/dev/null |grep -- -fwrapv > /dev/null; then
+           WRAP="-fwrapv"
+        fi
+
+        case $CC in
+            *clang*)
+                cc_is_clang=1
+                ;;
+            *)
+                if $CC --version 2>&1 | grep -q clang
+                then
+                    cc_is_clang=1
+                else
+                    cc_is_clang=
+                fi
+        esac
+
+        if test -n "${cc_is_clang}"
+        then
+            # Clang also needs -fwrapv
+            WRAP="-fwrapv"
+            # bpo-30104: disable strict aliasing to compile correctly dtoa.c,
+            # see Makefile.pre.in for more information
+            CFLAGS_ALIASING="-fno-strict-aliasing"
+        fi
+
+	case $ac_cv_prog_cc_g in
+	yes)
+	    if test "$Py_DEBUG" = 'true' ; then
+		# Optimization messes up debuggers, so turn it off for
+		# debug builds.
+                if "$CC" -v --help 2>/dev/null |grep -- -Og > /dev/null; then
+                    OPT="-g -Og -Wall"
+                else
+                    OPT="-g -O0 -Wall"
+                fi
+	    else
+		OPT="-g $WRAP -O3 -Wall"
+	    fi
+	    ;;
+	*)
+	    OPT="-O3 -Wall"
+	    ;;
+	esac
+
+	OPT="$OPT $STRICT_PROTO"
+
+	case $ac_sys_system in
+	    SCO_SV*) OPT="$OPT -m486 -DSCO5"
+	    ;;
+        esac
+	;;
+
+    *)
+	OPT="-O"
+	;;
+    esac
+    PYOPT=$OPT
+fi
+
+fi
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for itrunc in -lc" >&5
 $as_echo_n "checking for itrunc in -lc... " >&6; }
@@ -3581,11 +3927,6 @@ fi
 done
 
 
-PROJ_INCLUDE_DIR=
-PROJ_LIB_DIR=
-GOT_PROJ_INC=no
-GOT_PROJ_LIB=no
-PROJ_SUPPRESSED=no
 
 # Check whether --with-proj was given.
 if test "${with_proj+set}" = set; then :
@@ -3594,214 +3935,518 @@ else
   withval=yes
 fi
 
-case $withval in
-	yes)
-		for ac_header in projects.h
-do :
-  ac_fn_c_check_header_mongrel "$LINENO" "projects.h" "ac_cv_header_projects_h" "$ac_includes_default"
-if test "x$ac_cv_header_projects_h" = xyes; then :
-  cat >>confdefs.h <<_ACEOF
-#define HAVE_PROJECTS_H 1
-_ACEOF
- GOT_PROJ_INC=yes
+proj_withval=$withval
+
+
+# Check whether --with-legacy-proj was given.
+if test "${with_legacy_proj+set}" = set; then :
+  withval=$with_legacy_proj;
+else
+  withval=no
 fi
 
-done
+legacyproj_withval=$withval
 
-		{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for pj_inv in -lproj" >&5
-$as_echo_n "checking for pj_inv in -lproj... " >&6; }
-if ${ac_cv_lib_proj_pj_inv+:} false; then :
-  $as_echo_n "(cached) " >&6
+
+# Check whether --with-new-proj was given.
+if test "${with_new_proj+set}" = set; then :
+  withval=$with_new_proj;
 else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lproj  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
+  withval=no
+fi
 
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char pj_inv ();
-int
-main ()
-{
-return pj_inv ();
-  ;
-  return 0;
+newproj_withval=$withval
+
+if [ "$proj_withval" = "" ]; then
+  proj_withval=no
+fi
+if [ "$legacyproj_withval" = "" ]; then
+  legacyproj_withval=no
+fi
+if [ "$newproj_withval" = "" ]; then
+  newproj_withval=no
+fi
+
+if [ "$legacyproj_withval" != "no" -a "$newproj_withval" != "no" ]; then
+  as_fn_error $? "\"Don't specify both --with-legacy-proj and --with-new-proj at the same time. Instead use --with-proj to automatically detect version to use.\"" "$LINENO" 5
+fi
+
+if [ "$legacyproj_withval" != "no" -o "$newproj_withval" != "no" ]; then
+  proj_withval=no
+fi
+
+if [ "$legacyproj_withval" = "no" -a "$newproj_withval" = "no" -a "$proj_withval" = "no" ]; then
+  as_fn_error $? "\"Can't build rave without proj\"" "$LINENO" 5
+fi
+
+# This is a utility for beeing able to extract the include/lib from the --with directive.
+extract_include_or_lib_from_with() {
+  if [ "`echo $2 | grep ','`" = "" ]; then
+    proj_inc=$2/include
+    proj_lib=$2/lib
+  else
+    proj_inc="`echo $2 |cut -f1 -d,`"
+    proj_lib="`echo $2 |cut -f2 -d,`"
+  fi
+  if [ "$1" = "include" ]; then
+    echo "$proj_inc"
+  else
+    echo "$proj_lib"
+  fi
 }
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_proj_pj_inv=yes
-else
-  ac_cv_lib_proj_pj_inv=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_pj_inv" >&5
-$as_echo "$ac_cv_lib_proj_pj_inv" >&6; }
-if test "x$ac_cv_lib_proj_pj_inv" = xyes; then :
-  GOT_PROJ_LIB=yes
-fi
 
-		;;
-	no)
-		{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for Proj lib" >&5
-$as_echo_n "checking for Proj lib... " >&6; }
-		{ $as_echo "$as_me:${as_lineno-$LINENO}: result: suppressed" >&5
-$as_echo "suppressed" >&6; }
-		PROJ_SUPPRESSED=yes
-		;;
-	*)
-    if [ "$withval" != "" ]; then
-      if [ "`echo $withval | grep ','`" = "" ]; then
-        proj_inc=$withval/include
-        proj_lib=$withval/lib
-        echo "proj_inc=$proj_inc"
-      else
-        proj_inc="`echo $withval |cut -f1 -d,`"
-        proj_lib="`echo $withval |cut -f2 -d,`"
-      fi
-
-      if [ "$proj_inc" != "" ]; then
-        saved_CPPFLAGS="$CPPFLAGS"
-        CPPFLAGS="$CPPFLAGS -I$proj_inc"
-        for ac_header in projects.h
-do :
-  ac_fn_c_check_header_mongrel "$LINENO" "projects.h" "ac_cv_header_projects_h" "$ac_includes_default"
-if test "x$ac_cv_header_projects_h" = xyes; then :
-  cat >>confdefs.h <<_ACEOF
-#define HAVE_PROJECTS_H 1
-_ACEOF
- GOT_PROJ_INC=yes
+proj_inc=
+proj_lib=
+# If we are running autodetection, we first try that
+# Order for us when figuring out what to do is
+# Auto
+# New proj >= 6
+# Old proj <= 5
+if [ "$proj_withval" != "no" -a "$proj_withval" != "yes" ]; then
+  proj_inc=`extract_include_or_lib_from_with include "$proj_withval"`
+  proj_lib=`extract_include_or_lib_from_with lib "$proj_withval"`
+elif [ "$newproj_withval" != "no" -a "$newproj_withval" != "yes" ]; then
+  proj_inc=`extract_include_or_lib_from_with include "$newproj_withval"`
+  proj_lib=`extract_include_or_lib_from_with lib "$newproj_withval"`
+elif [ "$legacyproj_withval" != "no" -a "$legacyproj_withval" != "yes" ]; then
+  proj_inc=`extract_include_or_lib_from_with include "$legacyproj_withval"`
+  proj_lib=`extract_include_or_lib_from_with lib "$legacyproj_withval"`
 fi
 
-done
+PROJ6_CHECK_FAILED=no
+PROJ4_CHECK_FAILED=no
+GOT_PROJ_INC=no
+PROJ_INCLUDE_DIR=
+PROJ_LIB_DIR=
+PROJ_VERSION=0
 
-        if [ "$GOT_PROJ_INC" = "yes" ]; then
-          PROJ_INCLUDE_DIR="-I$proj_inc"
-        else
-          CPPFLAGS="$saved_CPPFLAGS"
-        fi
-      else
-        for ac_header in projects.h
-do :
-  ac_fn_c_check_header_mongrel "$LINENO" "projects.h" "ac_cv_header_projects_h" "$ac_includes_default"
-if test "x$ac_cv_header_projects_h" = xyes; then :
-  cat >>confdefs.h <<_ACEOF
-#define HAVE_PROJECTS_H 1
-_ACEOF
- GOT_PROJ_INC=yes
-fi
+if [ "$proj_withval" != "no" -o "$newproj_withval" != "no" ]; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: Trying to identify PROJ >= 6" >&5
+$as_echo "$as_me: Trying to identify PROJ >= 6" >&6;}
 
-done
-
-      fi
-
-      if [ "$proj_lib" != "" ]; then
-        saved_LDFLAGS="$LDFLAGS"
-        LDFLAGS="$LDFLAGS -L$proj_lib"
-        { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pj_inv in -lproj" >&5
-$as_echo_n "checking for pj_inv in -lproj... " >&6; }
-if ${ac_cv_lib_proj_pj_inv+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lproj  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char pj_inv ();
-int
-main ()
-{
-return pj_inv ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_proj_pj_inv=yes
-else
-  ac_cv_lib_proj_pj_inv=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_pj_inv" >&5
-$as_echo "$ac_cv_lib_proj_pj_inv" >&6; }
-if test "x$ac_cv_lib_proj_pj_inv" = xyes; then :
-  GOT_PROJ_LIB=yes
-fi
-
-        if [ "$GOT_PROJ_LIB" = "yes" ]; then
-          PROJ_LIB_DIR="-L$proj_lib"
-        else
-          LDFLAGS="$saved_LDFLAGS"
-        fi
-      else
-        { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pj_inv in -lproj" >&5
-$as_echo_n "checking for pj_inv in -lproj... " >&6; }
-if ${ac_cv_lib_proj_pj_inv+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  ac_check_lib_save_LIBS=$LIBS
-LIBS="-lproj  $LIBS"
-cat confdefs.h - <<_ACEOF >conftest.$ac_ext
-/* end confdefs.h.  */
-
-/* Override any GCC internal prototype to avoid an error.
-   Use char because int might match the return type of a GCC
-   builtin and then its argument prototype would still apply.  */
-#ifdef __cplusplus
-extern "C"
-#endif
-char pj_inv ();
-int
-main ()
-{
-return pj_inv ();
-  ;
-  return 0;
-}
-_ACEOF
-if ac_fn_c_try_link "$LINENO"; then :
-  ac_cv_lib_proj_pj_inv=yes
-else
-  ac_cv_lib_proj_pj_inv=no
-fi
-rm -f core conftest.err conftest.$ac_objext \
-    conftest$ac_exeext conftest.$ac_ext
-LIBS=$ac_check_lib_save_LIBS
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_pj_inv" >&5
-$as_echo "$ac_cv_lib_proj_pj_inv" >&6; }
-if test "x$ac_cv_lib_proj_pj_inv" = xyes; then :
-  GOT_PROJ_LIB=yes
-fi
-
-      fi
+  saved_CPPFLAGS="$CPPFLAGS"
+  saved_LDFLAGS="$LDFLAGS"
+  if [ "$proj_inc" != "" ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking if proj.h is accessible" >&5
+$as_echo_n "checking if proj.h is accessible... " >&6; }
+    if [ ! -f "$proj_inc/proj.h" ]; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+      PROJ6_CHECK_FAILED=yes
     else
-      as_fn_error $? "\"Odd argument passed for proj\"" "$LINENO" 5
-    fi
-    ;;
-esac
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+      CPPFLAGS="$CPPFLAGS -I$proj_inc"
+      for ac_header in proj.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "proj.h" "ac_cv_header_proj_h" "$ac_includes_default"
+if test "x$ac_cv_header_proj_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_PROJ_H 1
+_ACEOF
+ GOT_PROJ_INC=yes
+         PROJ_INCLUDE_DIR="-I$proj_inc"
+else
+  PROJ6_CHECK_FAILED=yes
 
-if [ "x$PROJ_SUPPRESSED" = "xno" ]; then
-	if [ "x$GOT_PROJ_INC" = "xno" -o "x$GOT_PROJ_LIB" = "xno" ]; then
-		as_fn_error $? "\"Could not successfully find the proj library\"" "$LINENO" 5
-	fi
+fi
+
+done
+
+    fi
+  else
+    for ac_header in proj.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "proj.h" "ac_cv_header_proj_h" "$ac_includes_default"
+if test "x$ac_cv_header_proj_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_PROJ_H 1
+_ACEOF
+ GOT_PROJ_INC=yes
+else
+  PROJ6_CHECK_FAILED=yes
+fi
+
+done
+
+  fi
+
+  if [ "$proj_lib" != "" ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking if libproj is accessible" >&5
+$as_echo_n "checking if libproj is accessible... " >&6; }
+    TMP=`ls -1 "$proj_lib"/libproj.* 2>/dev/null`
+    if [ "$TMP" = "" ]; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+      PROJ6_CHECK_FAILED=yes
+    else
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+      LDFLAGS="$LDFLAGS -L$proj_lib"
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking for proj_trans in -lproj" >&5
+$as_echo_n "checking for proj_trans in -lproj... " >&6; }
+if ${ac_cv_lib_proj_proj_trans+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lproj  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char proj_trans ();
+int
+main ()
+{
+return proj_trans ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_proj_proj_trans=yes
+else
+  ac_cv_lib_proj_proj_trans=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_proj_trans" >&5
+$as_echo "$ac_cv_lib_proj_proj_trans" >&6; }
+if test "x$ac_cv_lib_proj_proj_trans" = xyes; then :
+  GOT_PROJ_LIB=yes
+         PROJ_LIB_DIR="-L$proj_lib"
+else
+  LDFLAGS="$saved_LDFLAGS"
+         PROJ6_CHECK_FAILED=yes
+
+fi
+
+    fi
+  else
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for proj_trans in -lproj" >&5
+$as_echo_n "checking for proj_trans in -lproj... " >&6; }
+if ${ac_cv_lib_proj_proj_trans+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lproj  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char proj_trans ();
+int
+main ()
+{
+return proj_trans ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_proj_proj_trans=yes
+else
+  ac_cv_lib_proj_proj_trans=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_proj_trans" >&5
+$as_echo "$ac_cv_lib_proj_proj_trans" >&6; }
+if test "x$ac_cv_lib_proj_proj_trans" = xyes; then :
+  GOT_PROJ_LIB=yes
+else
+  PROJ6_CHECK_FAILED=yes
+fi
+
+  fi
+
+  if [ "$PROJ6_CHECK_FAILED" = "no" ]; then
+    if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "cannot run test program while cross compiling
+See \`config.log' for more details" "$LINENO" 5; }
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <proj.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+int
+main ()
+{
+printf("%d\n", PROJ_VERSION_MAJOR); exit(0);
+  ;
+  return 0;
+}
+
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
+  PROJ_VERSION=`./conftest$EXEEXT`
+
+else
+  PROJ6_CHECK_FAILED=yes
+
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+    if [ "$PROJ6_CHECK_FAILED" = "no" ]; then
+      PROJ_VERSION=`echo $PROJ_VERSION | egrep -e "^[0-9]+$"`
+      if [ "$PROJ_VERSION" = "" ]; then
+        PROJ6_CHECK_FAILED=yes
+        PROJ_VERSION=0
+      fi
+    fi
+  fi
+
+  if [ "$PROJ6_CHECK_FAILED" = "no" -a "$PROJ_VERSION" -ge 6 ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: identified proj version $PROJ_VERSION" >&5
+$as_echo "identified proj version $PROJ_VERSION" >&6; }
+  else
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: could not identify proj version >= 6" >&5
+$as_echo "could not identify proj version >= 6" >&6; }
+    CPPFLAGS="$saved_CPPFLAGS"
+    LDFLAGS="$saved_LDFLAGS"
+    PROJ6_CHECK_FAILED=yes
+  fi
+else
+  # If we don't atempt to identify proj.6 we can always assume that it has failed.
+  PROJ6_CHECK_FAILED=yes
+fi
+
+if [ "$PROJ6_CHECK_FAILED" = "yes" -a "$proj_withval" != "no" ] || [ "$legacyproj_withval" != "no" ]; then
+  { $as_echo "$as_me:${as_lineno-$LINENO}: Trying to identify PROJ <= 5" >&5
+$as_echo "$as_me: Trying to identify PROJ <= 5" >&6;}
+
+  saved_CPPFLAGS="$CPPFLAGS"
+  saved_LDFLAGS="$LDFLAGS"
+  if [ "$proj_inc" != "" ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking if projects.h is accessible" >&5
+$as_echo_n "checking if projects.h is accessible... " >&6; }
+    if [ ! -f "$proj_inc/projects.h" ]; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+      PROJ4_CHECK_FAILED=yes
+    else
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+      CPPFLAGS="$CPPFLAGS -I$proj_inc"
+      for ac_header in projects.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "projects.h" "ac_cv_header_projects_h" "$ac_includes_default"
+if test "x$ac_cv_header_projects_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_PROJECTS_H 1
+_ACEOF
+ GOT_PROJ_INC=yes
+         PROJ_INCLUDE_DIR="-I$proj_inc"
+else
+  PROJ4_CHECK_FAILED=yes
+
+fi
+
+done
+
+    fi
+  else
+    for ac_header in projects.h
+do :
+  ac_fn_c_check_header_mongrel "$LINENO" "projects.h" "ac_cv_header_projects_h" "$ac_includes_default"
+if test "x$ac_cv_header_projects_h" = xyes; then :
+  cat >>confdefs.h <<_ACEOF
+#define HAVE_PROJECTS_H 1
+_ACEOF
+ GOT_PROJ_INC=yes
+else
+  PROJ4_CHECK_FAILED=yes
+fi
+
+done
+
+  fi
+
+  if [ "$proj_lib" != "" ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking if libproj is accessible" >&5
+$as_echo_n "checking if libproj is accessible... " >&6; }
+    TMP=`ls -1 "$proj_lib"/libproj.* 2>/dev/null`
+    if [ "$TMP" = "" ]; then
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: no" >&5
+$as_echo "no" >&6; }
+      PROJ4_CHECK_FAILED=yes
+    else
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+$as_echo "yes" >&6; }
+      LDFLAGS="$LDFLAGS -L$proj_lib"
+      { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pj_transform in -lproj" >&5
+$as_echo_n "checking for pj_transform in -lproj... " >&6; }
+if ${ac_cv_lib_proj_pj_transform+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lproj  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char pj_transform ();
+int
+main ()
+{
+return pj_transform ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_proj_pj_transform=yes
+else
+  ac_cv_lib_proj_pj_transform=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_pj_transform" >&5
+$as_echo "$ac_cv_lib_proj_pj_transform" >&6; }
+if test "x$ac_cv_lib_proj_pj_transform" = xyes; then :
+  GOT_PROJ_LIB=yes
+         PROJ_LIB_DIR="-L$proj_lib"
+else
+  LDFLAGS="$saved_LDFLAGS"
+         PROJ4_CHECK_FAILED=yes
+
+fi
+
+    fi
+  else
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for pj_transform in -lproj" >&5
+$as_echo_n "checking for pj_transform in -lproj... " >&6; }
+if ${ac_cv_lib_proj_pj_transform+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lproj  $LIBS"
+cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+/* Override any GCC internal prototype to avoid an error.
+   Use char because int might match the return type of a GCC
+   builtin and then its argument prototype would still apply.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+char pj_transform ();
+int
+main ()
+{
+return pj_transform ();
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"; then :
+  ac_cv_lib_proj_pj_transform=yes
+else
+  ac_cv_lib_proj_pj_transform=no
+fi
+rm -f core conftest.err conftest.$ac_objext \
+    conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_lib_proj_pj_transform" >&5
+$as_echo "$ac_cv_lib_proj_pj_transform" >&6; }
+if test "x$ac_cv_lib_proj_pj_transform" = xyes; then :
+  GOT_PROJ_LIB=yes
+else
+  PROJ4_CHECK_FAILED=yes
+fi
+
+  fi
+
+  if [ "$PROJ4_CHECK_FAILED" = "no" ]; then
+    if test "$cross_compiling" = yes; then :
+  { { $as_echo "$as_me:${as_lineno-$LINENO}: error: in \`$ac_pwd':" >&5
+$as_echo "$as_me: error: in \`$ac_pwd':" >&2;}
+as_fn_error $? "cannot run test program while cross compiling
+See \`config.log' for more details" "$LINENO" 5; }
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+#include <projects.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+int
+main ()
+{
+printf("%d\n", (int)PJ_VERSION/100); exit(0);
+  ;
+  return 0;
+}
+
+_ACEOF
+if ac_fn_c_try_run "$LINENO"; then :
+  PROJ_VERSION=`./conftest$EXEEXT`
+
+else
+  PROJ4_CHECK_FAILED=yes
+
+fi
+rm -f core *.core core.conftest.* gmon.out bb.out conftest$ac_exeext \
+  conftest.$ac_objext conftest.beam conftest.$ac_ext
+fi
+
+    if [ "$PROJ4_CHECK_FAILED" = "no" ]; then
+      PROJ_VERSION=`echo $PROJ_VERSION | egrep -e "^[0-9]+$"`
+      if [ "$PROJ_VERSION" = "" ]; then
+        PROJ4_CHECK_FAILED=yes
+        PROJ_VERSION=0
+      fi
+    fi
+  fi
+
+  if [ "$PROJ4_CHECK_FAILED" = "no" -a "$PROJ_VERSION" -le 5 ]; then
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: identified proj version $PROJ_VERSION" >&5
+$as_echo "identified proj version $PROJ_VERSION" >&6; }
+  else
+    { $as_echo "$as_me:${as_lineno-$LINENO}: result: could not identify proj version <= 5" >&5
+$as_echo "could not identify proj version <= 5" >&6; }
+    CPPFLAGS="$saved_CPPFLAGS"
+    LDFLAGS="$saved_LDFLAGS"
+    PROJ4_CHECK_FAILED=yes
+  fi
+else
+  # If no proj.4 check is performed we can assume that it has failed.
+  PROJ4_CHECK_FAILED=yes
+fi
+
+USE_PROJ4_API=no
+if [ "$PROJ6_CHECK_FAILED" = "no" ]; then
+  USE_PROJ4_API=no
+elif [ "$PROJ4_CHECK_FAILED" = "no" ]; then
+  USE_PROJ4_API=yes
+else
+  as_fn_error $? "Could not identify any usable PROJ" "$LINENO" 5
 fi
 
 EXPAT_INCLUDE_DIR=
@@ -4037,7 +4682,8 @@ else
 fi
 
 NUMPY_INCLUDE_DIR=
-case $withval in
+if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+  case $withval in
 	no)
 		as_fn_error $? "You can not remove dependencies to numpy" "$LINENO" 5
 		;;
@@ -4047,12 +4693,12 @@ case $withval in
 		numpy_inc_app=
 
 		if test "xyes" = "x$numpy_inc"; then
-		  TESTNUMPYDIR=`python -c "import numpy; print eval(\"numpy.__\"+\"file__\")"`
+		  TESTNUMPYDIR=`$PYBIN -c "import numpy; print(eval(\"numpy.__\"+\"file__\"))"`
 		  if test $? -ne 0; then
-			numpy_inc="$PY_EXEC_INSTALLDIR/include/python$PYVERSION"
-	      else
-			numpy_inc=`echo $TESTNUMPYDIR | sed -e"s/\/__init__.pyc//"`
-	      fi
+			  numpy_inc="$PY_EXEC_INSTALLDIR/include/python$PYVERSION"
+	    else
+			  numpy_inc=`echo $TESTNUMPYDIR | sed -e"s/\/__init__.pyc//" | sed -e"s/\/__init__.py//"`
+	    fi
 		fi
 		if [ -f $numpy_inc/arrayobject.h ]; then
 			numpy_inc_app=
@@ -4072,7 +4718,8 @@ case $withval in
 		fi
 		NUMPY_INCLUDE_DIR="-I$numpy_inc$numpy_inc_app"
 		;;
-esac
+  esac
+fi
 
 
 
@@ -4083,23 +4730,37 @@ else
   withval=yes
 fi
 
-
 case $withval in
   no)
 	as_fn_error $? "You can not remove dependencies to hlhdf" "$LINENO" 5
     ;;
   *)
     hlhdf_root="`echo $withval`"
-    if test "xyes" = "x$hlhdf_root"; then
-      TESTHLDIR=`python -c "import _pyhl; print eval(\"_pyhl.__\"+\"file__\")"`
-      if test $? -ne 0; then
-        as_fn_error $? "\"Could not find hlhdf please specify --with-hlhdf=<hlhdfroot>\"" "$LINENO" 5
-      else
-        hlhdf_root=`echo $TESTHLDIR | sed -e"s/\/lib\/_pyhl.so//"`
+    if [ "$COMPILE_FOR_PYTHON" = "yes" ]; then
+      if test "xyes" = "x$hlhdf_root"; then
+        TESTHLDIR=`$PYBIN -c "import _pyhl; print(eval(\"_pyhl.__\"+\"file__\"))"`
+        if test $? -ne 0; then
+          as_fn_error $? "\"Could not find hlhdf please specify --with-hlhdf=<hlhdfroot>\"" "$LINENO" 5
+        else
+          hlhdf_root=`echo $TESTHLDIR | sed -e"s/\/lib\/_pyhl.so//"`
+        fi
+      fi
+    else
+      if [ "$hlhdf_root" = "yes" ]; then
+        hlhdf_root=`locate hlhdf/mkf/hldef.mk | head -1`
+        if [ $? -ne 0 ]; then
+          as_fn_error $? "\"Failed to locate hlhdf.mk defaulting to /usr/lib/hlhdf\"" "$LINENO" 5
+          hlhdf_root="/usr/lib/hlhdf"
+        fi
       fi
     fi
+
+    { $as_echo "$as_me:${as_lineno-$LINENO}: checking for hlhdf root dir including mkf file" >&5
+$as_echo_n "checking for hlhdf root dir including mkf file... " >&6; }
     if [ -f $hlhdf_root/mkf/hldef.mk ]; then
       HLHDF_ROOTDIR=$hlhdf_root
+      { $as_echo "$as_me:${as_lineno-$LINENO}: result: \"$HLHDF_ROOTDIR\"" >&5
+$as_echo "\"$HLHDF_ROOTDIR\"" >&6; }
     else
       as_fn_error $? "\"Could not find hlhdf please specify --with-hlhdf=<hlhdfroot>\"" "$LINENO" 5
     fi
@@ -4701,6 +5362,15 @@ if [ ! -f $HLHDF_HLDEF_MK_FILE ]; then
   as_fn_error $? "\"There is no mkfile $HLHDF_HLDEF_MK_FILE\"" "$LINENO" 5
 fi
 
+TEST_MD=`cat "$HLHDF_HLDEF_MK_FILE" | egrep -e "^OPTS=" | grep "DHLHDF_MEMORY_DEBUG"`
+if [ "$TEST_MD" != "" ]; then
+  PYOPT="$PYOPT -DHLHDF_MEMORY_DEBUG"
+fi
+
+
+
+
+
 
 
 
@@ -4714,6 +5384,7 @@ fi
 
 
 #Substitute the PROJ arguments
+
 
 
 

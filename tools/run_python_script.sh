@@ -9,8 +9,7 @@
 #
 # History:  2009-10-22 Created by Anders Henja
 ############################################################
-SCRFILE=`python -c "import os;print os.path.abspath(\"$0\")"`
-SCRIPTPATH=`dirname "$SCRFILE"`
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 DEF_MK_FILE="${SCRIPTPATH}/../def.mk"
 
@@ -21,6 +20,13 @@ fi
 
 RESULT=0
 
+# Identify python version
+PYTHON_BIN=`fgrep PYTHON_BIN "${DEF_MK_FILE}" | sed -e "s/\(PYTHON_BIN=[ \t]*\)//"`
+if [ "$PYTHON_BIN" = "" ]; then
+  PYTHON_BIN=python
+fi
+
+
 # RUN THE PYTHON TESTS
 HLHDF_MKFFILE=`fgrep HLHDF_HLDEF_MK_FILE "${DEF_MK_FILE}" | sed -e"s/\(HLHDF_HLDEF_MK_FILE=[ \t]*\)//"`
 
@@ -30,7 +36,9 @@ HDF5_LDPATH=`fgrep HDF5_LIBDIR "${HLHDF_MKFFILE}" | sed -e"s/\(HDF5_LIBDIR=[ \t]
 # Get HLHDFs libpath from raves mkf file
 HLHDF_LDPATH=`fgrep HLHDF_LIB_DIR "${DEF_MK_FILE}" | sed -e"s/\(HLHDF_LIB_DIR=[ \t]*\)//"`
 
-BNAME=`python -c 'from distutils import util; import sys; print "lib.%s-%s" % (util.get_platform(), sys.version[0:3])'`
+PROJ_LDPATH=`fgrep PROJ_LIB_DIR "${DEF_MK_FILE}" | sed -e"s/\(PROJ_LIB_DIR=[ \t]*\)//" | sed -e"s/-L//"`
+
+BNAME=`$PYTHON_BIN -c 'from distutils import util; import sys; print("lib.%s-%s" % (util.get_platform(), sys.version[0:3]))'`
 
 RBPATH="${SCRIPTPATH}/../Lib:${SCRIPTPATH}/../modules"
 RAVE_LDPATH="${SCRIPTPATH}/../librave/tnc:${SCRIPTPATH}/../librave/toolbox:${SCRIPTPATH}/../librave/pyapi:${SCRIPTPATH}/../librave/scansun:${SCRIPTPATH}/../librave/radvol/lib"
@@ -49,15 +57,15 @@ esac
 
 if [ "x$ISMACOS" = "xyes" ]; then
   if [ "$DYLD_LIBRARY_PATH" != "" ]; then
-    export DYLD_LIBRARY_PATH="${RAVE_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}:${LD_LIBRARY_PATH}"
+    export DYLD_LIBRARY_PATH="${RAVE_LDPATH}:${PROJ_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}:${LD_LIBRARY_PATH}"
   else
-    export DYLD_LIBRARY_PATH="${RAVE_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}"
+    export DYLD_LIBRARY_PATH="${RAVE_LDPATH}:${PROJ_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}"
   fi
 else
   if [ "$LD_LIBRARY_PATH" != "" ]; then
-    export LD_LIBRARY_PATH="${RAVE_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}:${LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="${RAVE_LDPATH}:${PROJ_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}:${LD_LIBRARY_PATH}"
   else
-    export LD_LIBRARY_PATH="${RAVE_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}"
+    export LD_LIBRARY_PATH="${RAVE_LDPATH}:${PROJ_LDPATH}:${HLHDF_LDPATH}:${HDF5_LDPATH}"
   fi
 fi
 
@@ -75,9 +83,9 @@ NARGS=$#
 PYSCRIPT=
 DIRNAME=
 if [ $NARGS -eq 1 ]; then
-  PYSCRIPT=`python -c "import os;print os.path.abspath(\"$1\")"`
+  PYSCRIPT=`$PYTHON_BIN -c "import os;print(os.path.abspath(\"$1\"))"`
 elif [ $NARGS -eq 2 ]; then
-  PYSCRIPT=`python -c "import os;print os.path.abspath(\"$1\")"`
+  PYSCRIPT=`$PYTHON_BIN -c "import os;print(os.path.abspath(\"$1\"))"`
   DIRNAME="$2"
 elif [ $NARGS -eq 0 ]; then
   # Do nothing
@@ -94,9 +102,9 @@ fi
 
 if [ "$PYSCRIPT" != "" ]; then
   #valgrind -v --leak-check=full --show-leak-kinds=all python "$PYSCRIPT"
-  python "$PYSCRIPT"
+  $PYTHON_BIN "$PYSCRIPT"
 else
-  python
+  $PYTHON_BIN
 fi
 
 VAL=$?

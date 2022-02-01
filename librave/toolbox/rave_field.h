@@ -31,7 +31,7 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
 #include "rave_list.h"
 #include "raveobject_list.h"
 #include "rave_data2d.h"
-
+#include "lazy_dataset.h"
 /**
  * Defines a Rave field
  */
@@ -52,6 +52,13 @@ extern RaveCoreObjectType RaveField_TYPE;
  * @returns 1 on success otherwise 0
  */
 int RaveField_setData(RaveField_t* field, long xsize, long ysize, void* data, RaveDataType type);
+
+/**
+ * Sets a lazy dataset as data member. On any requests to receive data, the lazy dataset will be used to populate
+ * the internal data field.
+ * @param[in]
+ */
+int RaveField_setLazyDataset(RaveField_t* field, LazyDataset_t* lazyDataset);
 
 /**
  * Creates a empty data field
@@ -154,6 +161,14 @@ int RaveField_addAttribute(RaveField_t* field,  RaveAttribute_t* attribute);
 RaveAttribute_t* RaveField_getAttribute(RaveField_t* field, const char* name);
 
 /**
+ * Returns if the specified attribute exists.
+ * @param[in] field - self
+ * @param[in] name - the name of the attribute
+ * @returns 1 if attribute exists, otherwise 0
+ */
+int RaveField_hasAttribute(RaveField_t* field, const char* name);
+
+/**
  * Returns a list of attribute names. Release with \@ref #RaveList_freeAndDestroy.
  * @param[in] field - self
  * @returns a list of attribute names
@@ -191,5 +206,14 @@ int RaveField_hasAttributeStringValue(RaveField_t* field, const char* name, cons
  * @returns the concatenated field on success otherwise NULL
  */
 RaveField_t* RaveField_concatX(RaveField_t* field, RaveField_t* other);
+
+/**
+ * Circular shift of the internal field in x & y dimension.
+ * @param[in] field - the field to be shifted
+ * @param[in] nx - the number of steps to be shifted in x-direction. Can be both positive and negative
+ * @param[in] ny - the number of steps to be shifted in y-direction. Can be both positive and negative
+ * @returns 1 if shift was successful otherwise 0
+ */
+int RaveField_circshiftData(RaveField_t* field, int nx, int ny);
 
 #endif /* RAVE_FIELD_H */

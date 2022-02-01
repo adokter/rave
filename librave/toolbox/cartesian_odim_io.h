@@ -29,6 +29,7 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
 #include "hlhdf.h"
 #include "cartesian.h"
 #include "cartesianvolume.h"
+#include "lazy_nodelist_reader.h"
 
 /**
  * Defines the odim h5 adaptor for cartesian products
@@ -41,22 +42,60 @@ typedef struct _CartesianOdimIO_t CartesianOdimIO_t;
 extern RaveCoreObjectType CartesianOdimIO_TYPE;
 
 /**
+ * Sets the version that this io class should handle.
+ * @param[in] self - self
+ * @param[in] version - the odim version
+ */
+void CartesianOdimIO_setVersion(CartesianOdimIO_t* self, RaveIO_ODIM_Version version);
+
+/**
+ * Returns the version that this io class handles.
+ * @param[in] self - self
+ * @returns - the odim version
+ */
+RaveIO_ODIM_Version CartesianOdimIO_getVersion(CartesianOdimIO_t* self);
+
+/**
+ * If writing should be done strictly. From ODIM H5 2.4 several how-attributes are mandatory. If
+ * any of these are missing and strict is set to true, then the writing will fail.
+ * @param[in] self - self
+ * @param[in] strict - if writing should be performed strictly or not
+ */
+void CartesianOdimIO_setStrict(CartesianOdimIO_t* self, int strict);
+
+/**
+ * If writing should be done strictly. From ODIM H5 2.4 several how-attributes are mandatory. If
+ * any of these are missing and strict is set to true, then the writing will fail.
+ * @param[in] self - self
+ * @returns if writing should be performed strictly or not
+ */
+int CartesianOdimIO_isStrict(CartesianOdimIO_t* self);
+
+/**
+ * If an error occurs during writing, you might get an indication for why
+ * by checking the error message.
+ * @param[in] self - self
+ * @returns the error message (will be an empty string if nothing to report).
+ */
+const char* CartesianOdimIO_getErrorMessage(CartesianOdimIO_t* self);
+
+/**
  * Reads a cartesian from the nodelist and sets the data in the cartesian.
  * @param[in] self - self
- * @param[in] nodelist - the hdf5 node list
+ * @param[in] lazyReader - the wrapper around the hdf5 node list
  * @param[in] cartesian - the cartesian that should get the attribute and data set
  * @returns 1 on success otherwise 0
  */
-int CartesianOdimIO_readCartesian(CartesianOdimIO_t* self, HL_NodeList* nodelist, Cartesian_t* cartesian);
+int CartesianOdimIO_readCartesian(CartesianOdimIO_t* self, LazyNodeListReader_t* lazyReader, Cartesian_t* cartesian);
 
 /**
  * Reads a volume from the nodelist and sets the data in the volume.
  * @param[in] self - self
- * @param[in] nodelist - the hdf5 node list
+ * @param[in] lazyReader - the wrapper around the hdf5 node list
  * @param[in] volume - the volume that should get the attribute and data set
  * @returns 1 on success otherwise 0
  */
-int CartesianOdimIO_readVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, CartesianVolume_t* volume);
+int CartesianOdimIO_readVolume(CartesianOdimIO_t* self, LazyNodeListReader_t* lazyReader, CartesianVolume_t* volume);
 
 /**
  * Fills a HL nodelist with information from a cartesian product.
@@ -76,9 +115,22 @@ int CartesianOdimIO_fillImage(CartesianOdimIO_t* self, HL_NodeList* nodelist, Ca
  */
 int CartesianOdimIO_fillVolume(CartesianOdimIO_t* self, HL_NodeList* nodelist, CartesianVolume_t* volume);
 
+
 /**
  * Validates an image in order to verify if it contains necessary information
  * for writing.
+ * @param[in] self - self
+ * @param[in] cartesian - the cartesian product to validate
+ * @param[in] msg - message array to get indication what is wrong
+ * @param[in] maxlen - max length of message array
+ * @return 1 if valid otherwise 0
+ */
+int CartesianOdimIO_isValidImageAddMsg(Cartesian_t* cartesian, char* msg, int maxlen);
+
+/**
+ * Validates an image in order to verify if it contains necessary information
+ * for writing.
+ * @param[in] self - self
  * @param[in] cartesian - the cartesian product to validate
  * @return 1 if valid otherwise 0
  */
@@ -87,6 +139,18 @@ int CartesianOdimIO_isValidImage(Cartesian_t* cartesian);
 /**
  * Validates an image belonging to a volume in order to verify if it
  * contains necessary information for writing.
+ * @param[in] self - self
+ * @param[in] cartesian - the cartesian product to validate
+ * @param[in] msg - message array to get indication what is wrong
+ * @param[in] maxlen - max length of message array
+ * @return 1 if valid otherwise 0
+ */
+int CartesianOdimIO_isValidVolumeImageAddMsg(Cartesian_t* cartesian, char* msg, int maxlen);
+
+/**
+ * Validates an image belonging to a volume in order to verify if it
+ * contains necessary information for writing.
+ * @param[in] self - self
  * @param[in] cartesian - the cartesian product to validate
  * @return 1 if valid otherwise 0
  */
@@ -95,9 +159,37 @@ int CartesianOdimIO_isValidVolumeImage(Cartesian_t* cartesian);
 /**
  * Validates an volume in order to verify if it contains necessary information
  * for writing.
+ * @param[in] self - self
  * @param[in] volume - the volume to validate
  * @return 1 if valid otherwise 0
  */
+int CartesianOdimIO_isValidVolumeAddMsg(CartesianVolume_t* volume, char* msg, int maxlen);
+
+/**
+ * Validates an volume in order to verify if it contains necessary information
+ * for writing.
+ * @param[in] self - self
+ * @param[in] volume - the volume to validate
+ * @param[in] msg - message array to get indication what is wrong
+ * @param[in] maxlen - max length of message array
+ * @return 1 if valid otherwise 0
+ */
 int CartesianOdimIO_isValidVolume(CartesianVolume_t* volume);
+
+/**
+ * Validates a volume according to strictness and version in order to verify if it contains necessary information.
+ * @param[in] self - self
+ * @param[in] volume - the volume to validate
+ * @return 1 if valid otherwise 0
+ */
+int CartesianOdimIO_validateVolumeHowAttributes(CartesianOdimIO_t* self, CartesianVolume_t* volume);
+
+/**
+ * Validates an image according to strictness and version in order to verify if it contains necessary information.
+ * @param[in] self - self
+ * @param[in] image - the image to validate
+ * @return 1 if valid otherwise 0
+ */
+int CartesianOdimIO_validateCartesianHowAttributes(CartesianOdimIO_t* self, Cartesian_t* image);
 
 #endif /* CARTESIAN_ODIM_IO_H */

@@ -26,7 +26,7 @@ along with RAVE.  If not, see <http://www.gnu.org/licenses/>.
  */
 #ifndef CARTESIAN_H
 #define CARTESIAN_H
-#include "rave_transform.h"
+#include "rave_proj.h"
 #include "projection.h"
 #include "area.h"
 #include "rave_object.h"
@@ -151,6 +151,21 @@ int Cartesian_setSource(Cartesian_t* cartesian, const char* value);
  * @returns the source or NULL if there is none
  */
 const char* Cartesian_getSource(Cartesian_t* cartesian);
+
+/**
+ * Sets the product name.
+ * @param[in] cartesian - self
+ * @param[in] value - the product name
+ * @returns 1 on success, otherwise 0
+ */
+int Cartesian_setProdname(Cartesian_t* cartesian, const char* value);
+
+/**
+ * Returns the product name.
+ * @param[in] cartesian - self
+ * @returns the product name or NULL if there is none
+ */
+const char* Cartesian_getProdname(Cartesian_t* cartesian);
 
 /**
  * Sets the object type this cartesian product should represent.
@@ -338,11 +353,13 @@ int Cartesian_setDefaultParameter(Cartesian_t* self, const char* name);
 const char* Cartesian_getDefaultParameter(Cartesian_t* self);
 
 /**
- * Sets the projection that defines this cartesian product.
+ * Sets the projection that defines this cartesian product. Will also necessary
+ * pipelines internally
  * @param[in] cartesian - the cartesian product
  * @param[in] projection - the projection
+ * @return 1 if operation successful, otherwise 0
  */
-void Cartesian_setProjection(Cartesian_t* cartesian, Projection_t* projection);
+int Cartesian_setProjection(Cartesian_t* cartesian, Projection_t* projection);
 
 /**
  * Returns a copy of the projection that is used for this cartesian product.
